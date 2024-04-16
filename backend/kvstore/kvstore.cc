@@ -22,7 +22,7 @@ using namespace std;
 unordered_map<string, unordered_map<string, string>> table;
 
 vector<int> openConnections;
-bool debug = false; // default no debugging
+bool debug = false; // default, debugging off
 int portNum = 10000; // default 10000
 
 // signal handler
