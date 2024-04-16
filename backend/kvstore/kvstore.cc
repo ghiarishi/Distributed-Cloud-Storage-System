@@ -22,7 +22,7 @@ using namespace std;
 unordered_map<string, unordered_map<string, string>> table;
 
 vector<int> openConnections;
-bool debug = false; // default, debugging off
+bool debug = false; // default no debugging
 int portNum = 10000; // default 10000
 
 // signal handler
@@ -51,6 +51,16 @@ struct thread_data {
     pthread_t threadID;
 };
 
+vector<string> split_kvstore_command(const string& command_str) {
+  vector<string> parameters;
+  stringstream ss(command_str); // Create a stringstream from the command
+  string parameter;
+  while (getline(ss, parameter, ',')) { // Read parameters separated by ','
+    parameters.push_back(parameter);
+  }
+  return parameters;
+
+}
 vector<string> parseParameters(const string& command) {
     istringstream iss(command);
     return vector<string>((istream_iterator<string>(iss)), istream_iterator<string>());
@@ -80,13 +90,15 @@ void* threadFunc(void* arg) {
                 fprintf(stderr, "[ %d ] C: %s\n", data->conFD, command.c_str());
             }
             cout<<command<<endl;
+
+            vector<string> parameters = split_kvstore_command(command.substr(command.find(' ')+1));
+            cout << parameters.size() << endl;
             // command is complete, execute it
             if (command.rfind("PUT ", 0) == 0) {
-                auto params = parseParameters(command.substr(4));
-                if (params.size() == 3) {
-                    string row = params[0];
-                    string col = params[1];
-                    string value = params[2];  // Here, value is directly used as a string
+                if (parameters.size() == 3) {
+                    string row = parameters[0];
+                    string col = parameters[1];
+                    string value = parameters[2];  // Here, value is directly used as a string
                     table[row][col] = value;
                     msg = "+OK\r\n";
                 } else {
@@ -94,9 +106,9 @@ void* threadFunc(void* arg) {
                 }
             } else if (command.rfind("GET ", 0) == 0) {
                 auto params = parseParameters(command.substr(4));
-                if (params.size() == 2) {
-                    string row = params[0];
-                    string col = params[1];
+                if (parameters.size() == 2) {
+                    string row = parameters[0];
+                    string col = parameters[1];
                     if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
                         msg = "+OK " + table[row][col] + "\r\n";
                     } else {
@@ -106,12 +118,11 @@ void* threadFunc(void* arg) {
                     msg = "-ERR Invalid GET parameters\r\n";
                 }
             } else if (command.rfind("CPUT ", 0) == 0) {
-                auto params = parseParameters(command.substr(5));
-                if (params.size() == 4) {
-                    string row = params[0];
-                    string col = params[1];
-                    string currentValue = params[2];
-                    string newValue = params[3];
+                if (parameters.size() == 4) {
+                    string row = parameters[0];
+                    string col = parameters[1];
+                    string currentValue = parameters[2];
+                    string newValue = parameters[3];
                     if (table[row][col] == currentValue) {
                         table[row][col] = newValue;
                         msg = "+OK\r\n";
@@ -122,10 +133,9 @@ void* threadFunc(void* arg) {
                     msg = "-ERR Invalid CPUT parameters\r\n";
                 }
             } else if (command.rfind("DELETE ", 0) == 0) {
-                auto params = parseParameters(command.substr(7));
-                if (params.size() == 2) {
-                    string row = params[0];
-                    string col = params[1];
+                if (parameters.size() == 2) {
+                    string row = parameters[0];
+                    string col = parameters[1];
                     table[row].erase(col);
                     msg = "+OK\r\n";
                 } else {
