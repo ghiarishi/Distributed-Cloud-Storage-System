@@ -15,15 +15,13 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include "helper.h"
 
 using namespace std;
 
 // Define the key-value store
 unordered_map<string, unordered_map<string, string>> table;
-
 vector<int> openConnections;
-bool debug = false; // default no debugging
-int portNum = 10000; // default 10000
 
 // signal handler
 void sigHandler(int signum) {
@@ -51,21 +49,19 @@ struct thread_data {
     pthread_t threadID;
 };
 
-vector<string> split_kvstore_command(const string& command_str) {
+vector<string> splitKvstoreCommand(const string& command_str) {
   vector<string> parameters;
-  stringstream ss(command_str); // Create a stringstream from the command
+  string temp = command_str.substr(0, command_str.find(' ') + 1);
+  transform(temp.begin(), temp.end(), temp.begin(), ::toupper); 
+  parameters.push_back(temp);
+  const string& command_parameters = command_str.substr(command_str.find(' ') + 1);
+  stringstream ss(command_parameters); // Create a stringstream from the command
   string parameter;
   while (getline(ss, parameter, ',')) { // Read parameters separated by ','
     parameters.push_back(parameter);
   }
   return parameters;
-
 }
-vector<string> parseParameters(const string& command) {
-    istringstream iss(command);
-    return vector<string>((istream_iterator<string>(iss)), istream_iterator<string>());
-}
-
 
 // thread function to run commands
 void* threadFunc(void* arg) {
@@ -91,24 +87,22 @@ void* threadFunc(void* arg) {
             }
             cout<<command<<endl;
 
-            vector<string> parameters = split_kvstore_command(command.substr(command.find(' ')+1));
-            cout << parameters.size() << endl;
+            vector<string> parameters = splitKvstoreCommand(command);
             // command is complete, execute it
-            if (command.rfind("PUT ", 0) == 0) {
-                if (parameters.size() == 3) {
-                    string row = parameters[0];
-                    string col = parameters[1];
-                    string value = parameters[2];  // Here, value is directly used as a string
+            if (parameters[0] == "PUT ") {
+                if (parameters.size() == 4) {
+                    string row = parameters[1];
+                    string col = parameters[2];
+                    string value = parameters[3];  // Here, value is directly used as a string
                     table[row][col] = value;
                     msg = "+OK\r\n";
                 } else {
                     msg = "-ERR Invalid PUT parameters\r\n";
                 }
-            } else if (command.rfind("GET ", 0) == 0) {
-                auto params = parseParameters(command.substr(4));
-                if (parameters.size() == 2) {
-                    string row = parameters[0];
-                    string col = parameters[1];
+            } else if (parameters[0] == "GET ") {
+                if (parameters.size() == 3) {
+                    string row = parameters[1];
+                    string col = parameters[2];
                     if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
                         msg = "+OK " + table[row][col] + "\r\n";
                     } else {
@@ -117,12 +111,12 @@ void* threadFunc(void* arg) {
                 } else {
                     msg = "-ERR Invalid GET parameters\r\n";
                 }
-            } else if (command.rfind("CPUT ", 0) == 0) {
-                if (parameters.size() == 4) {
-                    string row = parameters[0];
-                    string col = parameters[1];
-                    string currentValue = parameters[2];
-                    string newValue = parameters[3];
+            } else if (parameters[0] == "CPUT ") {
+                if (parameters.size() == 5) {
+                    string row = parameters[1];
+                    string col = parameters[2];
+                    string currentValue = parameters[3];
+                    string newValue = parameters[4];
                     if (table[row][col] == currentValue) {
                         table[row][col] = newValue;
                         msg = "+OK\r\n";
@@ -132,10 +126,10 @@ void* threadFunc(void* arg) {
                 } else {
                     msg = "-ERR Invalid CPUT parameters\r\n";
                 }
-            } else if (command.rfind("DELETE ", 0) == 0) {
-                if (parameters.size() == 2) {
-                    string row = parameters[0];
-                    string col = parameters[1];
+            } else if (parameters[0] == "DELETE ") {
+                if (parameters.size() == 3) {
+                    string row = parameters[1];
+                    string col = parameters[2];
                     table[row].erase(col);
                     msg = "+OK\r\n";
                 } else {
@@ -184,26 +178,13 @@ void* threadFunc(void* arg) {
 
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
+    cout << "Here " << endl;
+    parseArguments(argc, argv);
 
-    // getopt to parse '-p', '-a', '-v' argument options
-    int opt;    
-    while ((opt = getopt(argc, argv, "p:av")) != -1) {
-        switch (opt) {
-            case 'p':
-                // use specified port, default 10000
-                portNum = stoi(optarg);
-               break;
-            case 'a':
-                // full name and seas login to stderr, then exit
-                cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
-                return 0;
-            case 'v': 
-                // print debug output to server
-                debug = true;
-                break;
-        }
+    if(aFlag) {
+        cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
+        return 0;
     }
-
     // create new socket
     int listenFD = socket(PF_INET, SOCK_STREAM, 0);
     if (listenFD < 0){
@@ -222,6 +203,7 @@ int main(int argc, char *argv[]){
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htons(INADDR_ANY);
+    cout << "Here " << endl;
     servaddr.sin_port = htons(portNum);
 
     // bind socket to port
