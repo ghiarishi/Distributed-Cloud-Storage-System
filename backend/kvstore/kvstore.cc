@@ -15,15 +15,13 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include "helper.h"
 
 using namespace std;
 
 // Define the key-value store
 unordered_map<string, unordered_map<string, string>> table;
-
 vector<int> openConnections;
-bool debug = false; // default no debugging
-int portNum = 10000; // default 10000
 
 // signal handler
 void sigHandler(int signum) {
@@ -180,26 +178,13 @@ void* threadFunc(void* arg) {
 
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
+    cout << "Here " << endl;
+    parseArguments(argc, argv);
 
-    // getopt to parse '-p', '-a', '-v' argument options
-    int opt;    
-    while ((opt = getopt(argc, argv, "p:av")) != -1) {
-        switch (opt) {
-            case 'p':
-                // use specified port, default 10000
-                portNum = stoi(optarg);
-               break;
-            case 'a':
-                // full name and seas login to stderr, then exit
-                cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
-                return 0;
-            case 'v': 
-                // print debug output to server
-                debug = true;
-                break;
-        }
+    if(aFlag) {
+        cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
+        return 0;
     }
-
     // create new socket
     int listenFD = socket(PF_INET, SOCK_STREAM, 0);
     if (listenFD < 0){
@@ -218,6 +203,7 @@ int main(int argc, char *argv[]){
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htons(INADDR_ANY);
+    cout << "Here " << endl;
     servaddr.sin_port = htons(portNum);
 
     // bind socket to port
