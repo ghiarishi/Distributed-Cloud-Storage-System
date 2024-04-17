@@ -15,13 +15,16 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <fstream>
 #include "helper.h"
 
 using namespace std;
 
 // Define the key-value store
-unordered_map<string, unordered_map<string, string>> table;
 vector<int> openConnections;
+
+int currentNumberOfWritesForReplicaAndServer = 0;
+string diskFilePath;
 
 // signal handler
 void sigHandler(int signum) {
@@ -63,6 +66,126 @@ vector<string> splitKvstoreCommand(const string& command_str) {
   return parameters;
 }
 
+vector<string> split(const string& str, char delimiter) {
+    vector<string> tokens;
+    stringstream ss(str); // Create a stringstream from the input string
+
+    string token;
+    while (getline(ss, token, delimiter)) {
+        tokens.push_back(token);
+    }
+
+    return tokens;
+}
+
+void handleAppend(string command) {
+    if (command.size() > 0) {
+        appendToFile(diskFilePath + "-checkpoint", command);
+        currentNumberOfWritesForReplicaAndServer++;
+    }
+}
+
+void handleCommand(vector<string> parameters, string &msg, string command = "") {
+    if (parameters[0] == "PUT ") {
+        if (parameters.size() == 4) {
+            string row = parameters[1];
+            string col = parameters[2];
+            string value = parameters[3];  // Here, value is directly used as a string
+            table[row][col] = value;
+            msg = "+OK\r\n";
+            handleAppend(command);
+        } else {
+            msg = "-ERR Invalid PUT parameters\r\n";
+        }
+    } else if (parameters[0] == "GET ") {
+        if (parameters.size() == 3) {
+            string row = parameters[1];
+            string col = parameters[2];
+            if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
+                msg = "+OK " + table[row][col] + "\r\n";
+            } else {
+                msg = "-ERR Not Found\r\n";
+            }
+        } else {
+            msg = "-ERR Invalid GET parameters\r\n";
+        }
+    } else if (parameters[0] == "CPUT ") {
+        if (parameters.size() == 5) {
+            string row = parameters[1];
+            string col = parameters[2];
+            string currentValue = parameters[3];
+            string newValue = parameters[4];
+            if (table[row][col] == currentValue) {
+                table[row][col] = newValue;
+                msg = "+OK\r\n";
+                handleAppend(command);
+            } else {
+                msg = "-ERR Conditional Write Failed\r\n";
+            }
+        } else {
+            msg = "-ERR Invalid CPUT parameters\r\n";
+        }
+    } else if (parameters[0] == "DELETE ") {
+        if (parameters.size() == 3) {
+            string row = parameters[1];
+            string col = parameters[2];
+            table[row].erase(col);
+            msg = "+OK\r\n";
+            handleAppend(command);
+        } else {
+            msg = "-ERR Invalid DELETE parameters\r\n";
+        }
+    } else {
+        msg = "-ERR Unknown command\r\n";
+    }
+}
+
+void initialize(string path) {
+    ifstream dataFile(path);
+    if (dataFile.is_open()) {
+        string line;
+        string msg;
+        while (getline(dataFile, line)) {
+            vector<string> tokens = split(line, ',');
+            if (tokens.size() == 3) {
+                table[tokens[0]][tokens[1]] = tokens[2];
+            } else {
+                // TODO : <How to handle invalid file writes>
+            }
+        }
+        if (debug) {
+            printDebug("Disk file -> " + path + " loaded in-memory ");
+        }
+        dataFile.close();
+    } else {
+        cerr << "Error opening data file" << endl;
+    }
+    // Replay Checkpoint
+
+    ifstream logFile(path + "-checkpoint");  //  Adjust filename if needed
+
+    if (logFile.is_open()) {
+        string line;
+        string msg;
+        while (getline(logFile, line)) {
+            currentNumberOfWritesForReplicaAndServer++;
+            vector<string> parameters = splitKvstoreCommand(line);
+            handleCommand(parameters, msg);
+        }
+        logFile.close();
+    } else {
+        cerr << "Error opening checkpoint log file" << endl;
+    }
+
+    if (currentNumberOfWritesForReplicaAndServer >=3) {
+        checkpoint_table(path);
+        currentNumberOfWritesForReplicaAndServer = 0;
+        if (debug) {
+            printDebug("Checkpointing done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
+        }
+    }
+}
+
 // thread function to run commands
 void* threadFunc(void* arg) {
     struct thread_data* data = (struct thread_data*)arg;
@@ -85,58 +208,17 @@ void* threadFunc(void* arg) {
             if(debug){
                 fprintf(stderr, "[ %d ] C: %s\n", data->conFD, command.c_str());
             }
+
             cout<<command<<endl;
 
             vector<string> parameters = splitKvstoreCommand(command);
             // command is complete, execute it
-            if (parameters[0] == "PUT ") {
-                if (parameters.size() == 4) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    string value = parameters[3];  // Here, value is directly used as a string
-                    table[row][col] = value;
-                    msg = "+OK\r\n";
-                } else {
-                    msg = "-ERR Invalid PUT parameters\r\n";
-                }
-            } else if (parameters[0] == "GET ") {
-                if (parameters.size() == 3) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
-                        msg = "+OK " + table[row][col] + "\r\n";
-                    } else {
-                        msg = "-ERR Not Found\r\n";
-                    }
-                } else {
-                    msg = "-ERR Invalid GET parameters\r\n";
-                }
-            } else if (parameters[0] == "CPUT ") {
-                if (parameters.size() == 5) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    string currentValue = parameters[3];
-                    string newValue = parameters[4];
-                    if (table[row][col] == currentValue) {
-                        table[row][col] = newValue;
-                        msg = "+OK\r\n";
-                    } else {
-                        msg = "-ERR Conditional Write Failed\r\n";
-                    }
-                } else {
-                    msg = "-ERR Invalid CPUT parameters\r\n";
-                }
-            } else if (parameters[0] == "DELETE ") {
-                if (parameters.size() == 3) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    table[row].erase(col);
-                    msg = "+OK\r\n";
-                } else {
-                    msg = "-ERR Invalid DELETE parameters\r\n";
-                }
-            } else {
-                msg = "-ERR Unknown command\r\n";
+
+            handleCommand(parameters, msg, command);
+
+            if (currentNumberOfWritesForReplicaAndServer == 3) {
+                checkpoint_table(diskFilePath);
+                currentNumberOfWritesForReplicaAndServer = 0;
             }
 
             if (write(conFD, msg.c_str(), msg.length()) < 0){
@@ -178,8 +260,18 @@ void* threadFunc(void* arg) {
 
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
-    cout << "Here " << endl;
     parseArguments(argc, argv);
+    
+    if (debug) {
+        printDebug("Arguments parsed");
+    }
+
+    diskFilePath = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(portNum);
+    initialize(diskFilePath);
+
+    if (debug) {
+        printDebug("Initialization Done");
+    }
 
     if(aFlag) {
         cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
@@ -203,7 +295,6 @@ int main(int argc, char *argv[]){
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htons(INADDR_ANY);
-    cout << "Here " << endl;
     servaddr.sin_port = htons(portNum);
 
     // bind socket to port
