@@ -1,4 +1,4 @@
-// imports
+#include "helper.h"
 #include <iostream>
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +15,6 @@
 #include <iterator>
 #include <sstream>
 #include <string>
-#include "helper.h"
 
 using namespace std;
 
@@ -50,17 +49,17 @@ struct thread_data {
 };
 
 vector<string> splitKvstoreCommand(const string& command_str) {
-  vector<string> parameters;
-  string temp = command_str.substr(0, command_str.find(' ') + 1);
-  transform(temp.begin(), temp.end(), temp.begin(), ::toupper); 
-  parameters.push_back(temp);
-  const string& command_parameters = command_str.substr(command_str.find(' ') + 1);
-  stringstream ss(command_parameters); // Create a stringstream from the command
-  string parameter;
-  while (getline(ss, parameter, ',')) { // Read parameters separated by ','
+    vector<string> parameters;
+    string temp = command_str.substr(0, command_str.find(' ') + 1);
+    transform(temp.begin(), temp.end(), temp.begin(), ::toupper); 
+    parameters.push_back(temp);
+    const string& command_parameters = command_str.substr(command_str.find(' ') + 1);
+    stringstream ss(command_parameters); // Create a stringstream from the command
+    string parameter;
+    while (getline(ss, parameter, ',')) { // Read parameters separated by ','
     parameters.push_back(parameter);
-  }
-  return parameters;
+    }
+    return parameters;
 }
 
 // thread function to run commands
@@ -178,13 +177,24 @@ void* threadFunc(void* arg) {
 
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
-    cout << "Here " << endl;
     parseArguments(argc, argv);
 
     if(aFlag) {
-        cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
+        cerr<<"SEAS LOGIN HERE"<<endl;
         return 0;
     }
+
+    ServerMap servers;
+    parseServers("config.txt", servers);
+
+    // Displaying the parsed data
+    for (const auto& server : servers) {
+        cout << "Server ID: " << server.first << endl;
+        for (const auto& info : server.second) {
+            cout << "  IP: " << info.ip << ", Port: " << info.port << endl;
+        }
+    }
+
     // create new socket
     int listenFD = socket(PF_INET, SOCK_STREAM, 0);
     if (listenFD < 0){
@@ -203,7 +213,6 @@ int main(int argc, char *argv[]){
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htons(INADDR_ANY);
-    cout << "Here " << endl;
     servaddr.sin_port = htons(portNum);
 
     // bind socket to port
