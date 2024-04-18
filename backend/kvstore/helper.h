@@ -202,8 +202,6 @@ void send_heartbeat(const string& ip, int masterUDP, int localUDP) {
     close(sockfd);
 }
 
-#define BUFFER_SIZE 1024
-
 void recvHeartbeat(int port) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
