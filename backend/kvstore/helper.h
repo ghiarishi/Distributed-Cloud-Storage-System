@@ -8,7 +8,7 @@ int replicaGroup = 0;
 
 unordered_map<string, unordered_map<string, string>> table;
 
-
+// Function to parse command line arguments
 void parseArguments(int argc, char *argv[]) {
     int opt;    
     while ((opt = getopt(argc, argv, "i:p:av")) != -1) {
@@ -36,11 +36,13 @@ void printDebug(string debugLog) {
     cerr << debugLog << endl;
 }
 
+// Function to truncate fileName given as parameter/argument
 void truncateFile(string fileName) {
     ofstream file(fileName, ofstream::out | ofstream::trunc);
     file.close();
 }
 
+// Function to write to disk file from the in-memory table
 void checkpoint_table(const string& diskFile) {
     string temp_filename = diskFile + ".tmp"; // Temporary filename
 
@@ -69,6 +71,7 @@ void checkpoint_table(const string& diskFile) {
     }
 }
 
+// Function to append to filePath - the line to append is also given as a parameter
 void appendToFile(string filePath, string lineToAppend) {
     ofstream file(filePath, ios::app);
     if (file.is_open()) {

@@ -17,6 +17,7 @@
 #include <string>
 #include <fstream>
 #include "helper.h"
+#include "constants.h"
 
 using namespace std;
 
@@ -52,6 +53,7 @@ struct thread_data {
     pthread_t threadID;
 };
 
+// Function to split command received by this backend KVStore server. Split into actually command and the parameters - row,column,binaryvalue
 vector<string> splitKvstoreCommand(const string& command_str) {
   vector<string> parameters;
   string temp = command_str.substr(0, command_str.find(' ') + 1);
@@ -66,9 +68,10 @@ vector<string> splitKvstoreCommand(const string& command_str) {
   return parameters;
 }
 
+// Function to split a string based a on delimiter
 vector<string> split(const string& str, char delimiter) {
     vector<string> tokens;
-    stringstream ss(str); // Create a stringstream from the input string
+    stringstream ss(str);
 
     string token;
     while (getline(ss, token, delimiter)) {
@@ -78,6 +81,7 @@ vector<string> split(const string& str, char delimiter) {
     return tokens;
 }
 
+// Append the write command with parameters at the end of the checkpoint log file (along with parameters - PUT, CPUT and DELETE)
 void handleAppend(string command) {
     if (command.size() > 0) {
         appendToFile(diskFilePath + "-checkpoint", command);
@@ -85,6 +89,7 @@ void handleAppend(string command) {
     }
 }
 
+// Function to handle the split command given as parameters vector
 void handleCommand(vector<string> parameters, string &msg, string command = "") {
     if (parameters[0] == "PUT ") {
         if (parameters.size() == 4) {
@@ -140,6 +145,8 @@ void handleCommand(vector<string> parameters, string &msg, string command = "") 
     }
 }
 
+// Function to initialize in-memory map - which reads diskfile and replays the checkpointing file
+// TODO : Contact primary server and see if it is out of sync with them and update accordingly
 void initialize(string path) {
     ifstream dataFile(path);
     if (dataFile.is_open()) {
@@ -177,7 +184,7 @@ void initialize(string path) {
         cerr << "Error opening checkpoint log file" << endl;
     }
 
-    if (currentNumberOfWritesForReplicaAndServer >=3) {
+    if (currentNumberOfWritesForReplicaAndServer >= CHECKPOINTING_THRESHOLD) {
         checkpoint_table(path);
         currentNumberOfWritesForReplicaAndServer = 0;
         if (debug) {
@@ -216,7 +223,7 @@ void* threadFunc(void* arg) {
 
             handleCommand(parameters, msg, command);
 
-            if (currentNumberOfWritesForReplicaAndServer == 3) {
+            if (currentNumberOfWritesForReplicaAndServer == CHECKPOINTING_THRESHOLD) {
                 checkpoint_table(diskFilePath);
                 currentNumberOfWritesForReplicaAndServer = 0;
             }
