@@ -1,8 +1,11 @@
-TARGETS = kvstore
+TARGETS = kvstore master
 
 all: $(TARGETS)
 
-kvstore: kvstore.cc
+kvstore: kvstore.cc helper.h
+	g++ $^ -pthread -o $@
+
+master: master.cc helper.h
 	g++ $^ -pthread -o $@
 
 clean::

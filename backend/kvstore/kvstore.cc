@@ -4,9 +4,11 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <cstring>
 #include <errno.h>
 #include <stdlib.h> 
 #include <pthread.h>
+#include <thread>
 #include <vector>
 #include <signal.h>
 #include <algorithm>
@@ -21,8 +23,7 @@
 
 using namespace std;
 
-// Define the key-value store
-vector<int> openConnections;
+ServerMap servers;
 
 int currentNumberOfWritesForReplicaAndServer = 0;
 string diskFilePath;
@@ -57,7 +58,7 @@ struct thread_data {
 vector<string> splitKvstoreCommand(const string& command_str) {
   vector<string> parameters;
   string temp = command_str.substr(0, command_str.find(' ') + 1);
-  transform(temp.begin(), temp.end(), temp.begin(), ::toupper); 
+  transform(temp.begin(), temp.end(), temp.begin(), ::toupper);
   parameters.push_back(temp);
   const string& command_parameters = command_str.substr(command_str.find(' ') + 1);
   stringstream ss(command_parameters); // Create a stringstream from the command
@@ -210,7 +211,7 @@ void* threadFunc(void* arg) {
         }
         if (ch == '\r') { // if return carriage
             prevCharReturn = true;
-        } 
+        }
         else if (ch == '\n' && prevCharReturn) { // if /r followed by /n, command is complete
             if(debug){
                 fprintf(stderr, "[ %d ] C: %s\n", data->conFD, command.c_str());
@@ -268,12 +269,12 @@ void* threadFunc(void* arg) {
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
     parseArguments(argc, argv);
-    
+
     if (debug) {
         printDebug("Arguments parsed");
     }
 
-    diskFilePath = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(portNum);
+    diskFilePath = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(myTCP);
     initialize(diskFilePath);
 
     if (debug) {
@@ -284,6 +285,29 @@ int main(int argc, char *argv[]){
         cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
         return 0;
     }
+
+    parseServers("config.txt", servers);
+
+    // Displaying the parsed data
+    for (const auto& server : servers) {
+        cout << "Server ID: " << server.first << endl;
+        for (const auto& info : server.second) {
+            if (server.first == 0) {
+                masterIP = info.ip;
+                masterTCP = info.tcpPort;
+                masterUDP = info.udpPort;
+            }
+            if (myTCP == info.tcpPort){
+                myUDP = info.udpPort;
+                cout<<"my udp is: " << to_string(myUDP)<<endl;
+            }
+            cout << "  IP: " << info.ip << ", TCP Port: " << info.tcpPort << ", UDP Port: " << info.udpPort << endl;
+        }
+    }
+
+    // create a separate thread to send heartbeat to master node
+    thread heartbeat_thread(send_heartbeat, masterIP, masterUDP, myUDP);
+
     // create new socket
     int listenFD = socket(PF_INET, SOCK_STREAM, 0);
     if (listenFD < 0){
@@ -302,7 +326,7 @@ int main(int argc, char *argv[]){
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htons(INADDR_ANY);
-    servaddr.sin_port = htons(portNum);
+    servaddr.sin_port = htons(myTCP);
 
     // bind socket to port
     if (bind(listenFD, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0){
@@ -357,6 +381,7 @@ int main(int argc, char *argv[]){
         }
         if (pthread_detach(data->threadID) < 0){ // detach the thread (kills it)
             fprintf(stderr, "Failed to detach thread: %s\n", strerror(errno));
-        }; 
+        };
     }
+    heartbeat_thread.detach();
 }
