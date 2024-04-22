@@ -1,13 +1,9 @@
-TARGETS = kvstore master
-CXXFLAGS = -w
+TARGETS = kvstore
 
 all: $(TARGETS)
 
-kvstore: kvstore.cc helper.h
-	g++ $(CXXFLAGS) $^ -pthread -o $@
+kvstore: kvstore.cc
+	g++ $^ -pthread -o $@
 
-master: master.cc helper.h
-	g++ $(CXXFLAGS) $^ -pthread -o $@
-
-clean:
+clean::
 	rm -fv $(TARGETS) *~ *.o
