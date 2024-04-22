@@ -25,6 +25,9 @@ using namespace std;
 ServerInfo masterInfo;
 ServerInfo primaryInfo;
 
+int currentNumberOfWritesForReplicaAndServer = 0;
+string diskFilePath;
+
 // signal handler
 void sigHandler(int signum) {
     for (int conFD : openConnections) { // iterate through all currently open connections and shut them down
@@ -63,6 +66,165 @@ vector<string> splitKvstoreCommand(const string& command_str) {
     parameters.push_back(parameter);
     }
     return parameters;
+}
+
+// Function to split a string based a on delimiter
+vector<string> split(const string& str, char delimiter) {
+    vector<string> tokens;
+    stringstream ss(str);
+
+    string token;
+    while (getline(ss, token, delimiter)) {
+        tokens.push_back(token);
+    }
+
+    return tokens;
+}
+
+// Append the write command with parameters at the end of the checkpoint log file (along with parameters - PUT, CPUT and DELETE)
+void handleAppend(string command) {
+    if (command.size() > 0) {
+        appendToFile(diskFilePath + "-checkpoint", command);
+        currentNumberOfWritesForReplicaAndServer++;
+    }
+}
+
+void handleCommand(vector<string> parameters, string &msg, string command = "") {
+    if (parameters[0] == "PUT ") {
+        if (parameters.size() == 4) {
+            string row = parameters[1];
+            string col = parameters[2];
+            string value = parameters[3];  // Here, value is directly used as a string
+            table[row][col] = value;
+            msg = "+OK\r\n";
+            handleAppend(command);
+        } else {
+            msg = "-ERR Invalid PUT parameters\r\n";
+        }
+    } else if (parameters[0] == "GET ") {
+        if (parameters.size() == 3) {
+            string row = parameters[1];
+            string col = parameters[2];
+            if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
+                msg = "+OK " + table[row][col] + "\r\n";
+            } else {
+                msg = "-ERR Not Found\r\n";
+            }
+        } else {
+            msg = "-ERR Invalid GET parameters\r\n";
+        }
+    } else if (parameters[0] == "CPUT ") {
+        if (parameters.size() == 5) {
+            string row = parameters[1];
+            string col = parameters[2];
+            string currentValue = parameters[3];
+            string newValue = parameters[4];
+            if (table[row][col] == currentValue) {
+                table[row][col] = newValue;
+                msg = "+OK\r\n";
+                handleAppend(command);
+            } else {
+                msg = "-ERR Conditional Write Failed\r\n";
+            }
+        } else {
+            msg = "-ERR Invalid CPUT parameters\r\n";
+        }
+    } else if (parameters[0] == "DELETE ") {
+        if (parameters.size() == 3) {
+            string row = parameters[1];
+            string col = parameters[2];
+            table[row].erase(col);
+            msg = "+OK\r\n";
+            handleAppend(command);
+        } else {
+            msg = "-ERR Invalid DELETE parameters\r\n";
+        }
+    } else if (parameters[0] == "LIST ") {
+        string  keys;
+        for (const auto& entry : table) {
+            if (entry.first == parameters[1]) {
+                const auto& inner_map = entry.second;
+                for (const auto& inner_entry : inner_map) {
+                    if (inner_entry.first.find(parameters[2]) == 0) {
+                        keys+= inner_entry.first + "\n";
+                    }
+                }
+            }
+        }
+        msg = keys;
+    } else {
+        msg = "-ERR Unknown command\r\n";
+    }
+}
+
+// Function to initialize in-memory map - which reads diskfile and replays the checkpointing file
+// TODO : Contact primary server and see if it is out of sync with them and update accordingly
+void initialize(string path) {
+    // Create the file if it doesn't exist and open it for appending
+    fstream file(path, ios::out | ios::app);
+
+    if (!file.is_open()) {
+        cerr << "Error opening data file" << endl;
+        return;
+    }
+
+    // If the file exists, close it and reopen it for reading
+    file.close();
+    
+    ifstream dataFile(path);
+    if (dataFile.is_open()) {
+        string line;
+        string msg;
+        while (getline(dataFile, line)) {
+            vector<string> tokens = split(line, ',');
+            if (tokens.size() == 3) {
+                table[tokens[0]][tokens[1]] = tokens[2];
+            } else {
+                // TODO : <How to handle invalid file writes>
+            }
+        }
+        if (debug) {
+            printDebug("Disk file -> " + path + " loaded in-memory ");
+        }
+        dataFile.close();
+    } else {
+        cerr << "Error opening data file" << endl;
+    }
+    // Replay Checkpoint
+
+    // Create the file if it doesn't exist and open it for appending
+    fstream logFileTemp(path + "-checkpoint", ios::out | ios::app);
+
+    if (!logFileTemp.is_open()) {
+        cerr << "Error opening data file" << endl;
+        return;
+    }
+
+    // If the file exists, close it and reopen it for reading
+    logFileTemp.close();
+
+    ifstream logFile(path + "-checkpoint");  //  Adjust filename if needed
+
+    if (logFile.is_open()) {
+        string line;
+        string msg;
+        while (getline(logFile, line)) {
+            currentNumberOfWritesForReplicaAndServer++;
+            vector<string> parameters = splitKvstoreCommand(line);
+            handleCommand(parameters, msg);
+        }
+        logFile.close();
+    } else {
+        cerr << "Error opening checkpoint log file" << endl;
+    }
+
+    if (currentNumberOfWritesForReplicaAndServer >= CHECKPOINTING_THRESHOLD) {
+        checkpoint_table(path);
+        currentNumberOfWritesForReplicaAndServer = 0;
+        if (debug) {
+            printDebug("Checkpointing done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
+        }
+    }
 }
 
 void receiveStatus() {
@@ -142,7 +304,6 @@ void receiveStatus() {
     close(sockfd);
 }
 
-
 void sendHeartbeat() {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -199,54 +360,12 @@ void* threadFunc(void* arg) {
 
             vector<string> parameters = splitKvstoreCommand(command);
             // command is complete, execute it
-            if (parameters[0] == "PUT ") {
-                if (parameters.size() == 4) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    string value = parameters[3];  // Here, value is directly used as a string
-                    table[row][col] = value;
-                    msg = "+OK\r\n";
-                } else {
-                    msg = "-ERR Invalid PUT parameters\r\n";
-                }
-            } else if (parameters[0] == "GET ") {
-                if (parameters.size() == 3) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
-                        msg = "+OK " + table[row][col] + "\r\n";
-                    } else {
-                        msg = "-ERR Not Found\r\n";
-                    }
-                } else {
-                    msg = "-ERR Invalid GET parameters\r\n";
-                }
-            } else if (parameters[0] == "CPUT ") {
-                if (parameters.size() == 5) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    string currentValue = parameters[3];
-                    string newValue = parameters[4];
-                    if (table[row][col] == currentValue) {
-                        table[row][col] = newValue;
-                        msg = "+OK\r\n";
-                    } else {
-                        msg = "-ERR Conditional Write Failed\r\n";
-                    }
-                } else {
-                    msg = "-ERR Invalid CPUT parameters\r\n";
-                }
-            } else if (parameters[0] == "DELETE ") {
-                if (parameters.size() == 3) {
-                    string row = parameters[1];
-                    string col = parameters[2];
-                    table[row].erase(col);
-                    msg = "+OK\r\n";
-                } else {
-                    msg = "-ERR Invalid DELETE parameters\r\n";
-                }
-            } else {
-                msg = "-ERR Unknown command\r\n";
+
+            handleCommand(parameters, msg, command);
+
+            if (currentNumberOfWritesForReplicaAndServer == CHECKPOINTING_THRESHOLD) {
+                checkpoint_table(diskFilePath);
+                currentNumberOfWritesForReplicaAndServer = 0;
             }
 
             if (write(conFD, msg.c_str(), msg.length()) < 0){
@@ -289,6 +408,9 @@ void* threadFunc(void* arg) {
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
     parseArguments(argc, argv);
+
+    diskFilePath = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(myInfo.tcpPort);
+    initialize(diskFilePath);
 
     if(aFlag) {
         cerr<<"SEAS LOGIN HERE"<<endl;
