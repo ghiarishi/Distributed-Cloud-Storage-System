@@ -1,4 +1,5 @@
-// imports
+#include "helper.h"
+#include "constants.h"
 #include <iostream>
 #include <stdio.h>
 #include <string.h>
@@ -17,16 +18,12 @@
 #include <iterator>
 #include <sstream>
 #include <string>
-#include <fstream>
-#include "helper.h"
-#include "constants.h"
+#include <mutex>
+#include <ctime>
 
 using namespace std;
-
-ServerMap servers;
-
-int currentNumberOfWritesForReplicaAndServer = 0;
-string diskFilePath;
+ServerInfo masterInfo;
+ServerInfo primaryInfo;
 
 // signal handler
 void sigHandler(int signum) {
@@ -54,144 +51,126 @@ struct thread_data {
     pthread_t threadID;
 };
 
-// Function to split command received by this backend KVStore server. Split into actually command and the parameters - row,column,binaryvalue
 vector<string> splitKvstoreCommand(const string& command_str) {
-  vector<string> parameters;
-  string temp = command_str.substr(0, command_str.find(' ') + 1);
-  transform(temp.begin(), temp.end(), temp.begin(), ::toupper);
-  parameters.push_back(temp);
-  const string& command_parameters = command_str.substr(command_str.find(' ') + 1);
-  stringstream ss(command_parameters); // Create a stringstream from the command
-  string parameter;
-  while (getline(ss, parameter, ',')) { // Read parameters separated by ','
+    vector<string> parameters;
+    string temp = command_str.substr(0, command_str.find(' ') + 1);
+    transform(temp.begin(), temp.end(), temp.begin(), ::toupper); 
+    parameters.push_back(temp);
+    const string& command_parameters = command_str.substr(command_str.find(' ') + 1);
+    stringstream ss(command_parameters); // Create a stringstream from the command
+    string parameter;
+    while (getline(ss, parameter, ',')) { // Read parameters separated by ','
     parameters.push_back(parameter);
-  }
-  return parameters;
+    }
+    return parameters;
 }
 
-// Function to split a string based a on delimiter
-vector<string> split(const string& str, char delimiter) {
-    vector<string> tokens;
-    stringstream ss(str);
+void receiveStatus() {
 
-    string token;
-    while (getline(ss, token, delimiter)) {
-        tokens.push_back(token);
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket" << endl;
+        return;
     }
 
-    return tokens;
-}
+    struct sockaddr_in servaddr, cliaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_port = htons(myInfo.udpPort2);
 
-// Append the write command with parameters at the end of the checkpoint log file (along with parameters - PUT, CPUT and DELETE)
-void handleAppend(string command) {
-    if (command.size() > 0) {
-        appendToFile(diskFilePath + "-checkpoint", command);
-        currentNumberOfWritesForReplicaAndServer++;
+    if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        cerr << "Bind failed" << endl;
+        close(sockfd);
+        return;
     }
-}
 
-// Function to handle the split command given as parameters vector
-void handleCommand(vector<string> parameters, string &msg, string command = "") {
-    if (parameters[0] == "PUT ") {
-        if (parameters.size() == 4) {
-            string row = parameters[1];
-            string col = parameters[2];
-            string value = parameters[3];  // Here, value is directly used as a string
-            table[row][col] = value;
-            msg = "+OK\r\n";
-            handleAppend(command);
-        } else {
-            msg = "-ERR Invalid PUT parameters\r\n";
-        }
-    } else if (parameters[0] == "GET ") {
-        if (parameters.size() == 3) {
-            string row = parameters[1];
-            string col = parameters[2];
-            if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
-                msg = "+OK " + table[row][col] + "\r\n";
-            } else {
-                msg = "-ERR Not Found\r\n";
+    
+    while(true){
+
+        char buffer[BUFFER_SIZE];
+        socklen_t len;
+        int n;
+
+        len = sizeof(cliaddr);
+        n = recvfrom(sockfd, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&cliaddr, &len);
+        if (n > 0) {
+            buffer[n] = '\0';
+            string message(buffer);
+            cout << "Status message received: " << buffer << endl;
+
+            
+            size_t posColon = message.find(":");
+            if (message.substr(0, posColon) == "PRIMARY"){ // primary
+                cout<<"Set to Primary in replica group " << to_string(replicaGroup)<<endl;
+                myInfo.isPrimary = true;
+            } 
+            else{ // secondary
+                size_t posAt = message.find("@");
+                string ip_port = message.substr(posColon+1, posAt - posColon - 1);
+
+                string ipTemp = ip_port.substr(0, ip_port.find(":"));
+                int tcpTemp = stoi(ip_port.substr(ip_port.find(":") + 1));
+
+                cout<<"Set to Secondary in replica group " << to_string(replicaGroup)<<endl;
+
+                for (auto info:servers[replicaGroup]){
+                    if (info.tcpPort == tcpTemp && info.ip == ipTemp){
+                        info.isPrimary = true;
+                        primaryInfo = info;
+                    }
+                }
             }
-        } else {
-            msg = "-ERR Invalid GET parameters\r\n";
-        }
-    } else if (parameters[0] == "CPUT ") {
-        if (parameters.size() == 5) {
-            string row = parameters[1];
-            string col = parameters[2];
-            string currentValue = parameters[3];
-            string newValue = parameters[4];
-            if (table[row][col] == currentValue) {
-                table[row][col] = newValue;
-                msg = "+OK\r\n";
-                handleAppend(command);
-            } else {
-                msg = "-ERR Conditional Write Failed\r\n";
+
+            // SERVER IS DEAD
+            size_t posSemi = message.find(";");
+            if (posSemi != std::string::npos) {
+                int deadTCP = stoi(message.substr(posSemi + 1));
+                auto& serverList = servers[replicaGroup]; // Reference to the vector of servers in the specified group
+                for (auto it = serverList.begin(); it != serverList.end(); ++it) {
+                    if (it->tcpPort == deadTCP){
+                        serverList.erase(it);
+                        cout << "Dead server removed from map" << endl;
+                    } 
+                }
             }
-        } else {
-            msg = "-ERR Invalid CPUT parameters\r\n";
+        
         }
-    } else if (parameters[0] == "DELETE ") {
-        if (parameters.size() == 3) {
-            string row = parameters[1];
-            string col = parameters[2];
-            table[row].erase(col);
-            msg = "+OK\r\n";
-            handleAppend(command);
-        } else {
-            msg = "-ERR Invalid DELETE parameters\r\n";
-        }
-    } else {
-        msg = "-ERR Unknown command\r\n";
+
     }
+    
+    close(sockfd);
 }
 
-// Function to initialize in-memory map - which reads diskfile and replays the checkpointing file
-// TODO : Contact primary server and see if it is out of sync with them and update accordingly
-void initialize(string path) {
-    ifstream dataFile(path);
-    if (dataFile.is_open()) {
-        string line;
-        string msg;
-        while (getline(dataFile, line)) {
-            vector<string> tokens = split(line, ',');
-            if (tokens.size() == 3) {
-                table[tokens[0]][tokens[1]] = tokens[2];
-            } else {
-                // TODO : <How to handle invalid file writes>
-            }
-        }
-        if (debug) {
-            printDebug("Disk file -> " + path + " loaded in-memory ");
-        }
-        dataFile.close();
-    } else {
-        cerr << "Error opening data file" << endl;
-    }
-    // Replay Checkpoint
 
-    ifstream logFile(path + "-checkpoint");  //  Adjust filename if needed
-
-    if (logFile.is_open()) {
-        string line;
-        string msg;
-        while (getline(logFile, line)) {
-            currentNumberOfWritesForReplicaAndServer++;
-            vector<string> parameters = splitKvstoreCommand(line);
-            handleCommand(parameters, msg);
-        }
-        logFile.close();
-    } else {
-        cerr << "Error opening checkpoint log file" << endl;
+void sendHeartbeat() {
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket" << endl;
+        return;
     }
 
-    if (currentNumberOfWritesForReplicaAndServer >= CHECKPOINTING_THRESHOLD) {
-        checkpoint_table(path);
-        currentNumberOfWritesForReplicaAndServer = 0;
-        if (debug) {
-            printDebug("Checkpointing done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
+    // Setup destination address structure
+    struct sockaddr_in servaddr;
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(masterInfo.udpPort);
+    servaddr.sin_addr.s_addr = inet_addr(masterInfo.ip.c_str());
+
+    string heartbeat_message = to_string(replicaGroup) + "," + to_string(myInfo.tcpPort) + ",heartbeat";
+    heartbeat_message.push_back('\0');
+
+    while (true) {
+        int send_status = sendto(sockfd, heartbeat_message.c_str(), heartbeat_message.size(),
+                                 0, (const struct sockaddr*)&servaddr, sizeof(servaddr));
+        if (send_status < 0) {
+            cerr << "Error sending heartbeat" << endl;
         }
+        // cout<<"heartbeat"<<endl;
+
+        this_thread::sleep_for(chrono::seconds(HEARTBEAT_INTERVAL)); // Send every 2 seconds, adjusted from your comment
     }
+
+    close(sockfd);
 }
 
 // thread function to run commands
@@ -211,22 +190,63 @@ void* threadFunc(void* arg) {
         }
         if (ch == '\r') { // if return carriage
             prevCharReturn = true;
-        }
+        } 
         else if (ch == '\n' && prevCharReturn) { // if /r followed by /n, command is complete
             if(debug){
                 fprintf(stderr, "[ %d ] C: %s\n", data->conFD, command.c_str());
             }
-
             cout<<command<<endl;
 
             vector<string> parameters = splitKvstoreCommand(command);
             // command is complete, execute it
-
-            handleCommand(parameters, msg, command);
-
-            if (currentNumberOfWritesForReplicaAndServer == CHECKPOINTING_THRESHOLD) {
-                checkpoint_table(diskFilePath);
-                currentNumberOfWritesForReplicaAndServer = 0;
+            if (parameters[0] == "PUT ") {
+                if (parameters.size() == 4) {
+                    string row = parameters[1];
+                    string col = parameters[2];
+                    string value = parameters[3];  // Here, value is directly used as a string
+                    table[row][col] = value;
+                    msg = "+OK\r\n";
+                } else {
+                    msg = "-ERR Invalid PUT parameters\r\n";
+                }
+            } else if (parameters[0] == "GET ") {
+                if (parameters.size() == 3) {
+                    string row = parameters[1];
+                    string col = parameters[2];
+                    if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
+                        msg = "+OK " + table[row][col] + "\r\n";
+                    } else {
+                        msg = "-ERR Not Found\r\n";
+                    }
+                } else {
+                    msg = "-ERR Invalid GET parameters\r\n";
+                }
+            } else if (parameters[0] == "CPUT ") {
+                if (parameters.size() == 5) {
+                    string row = parameters[1];
+                    string col = parameters[2];
+                    string currentValue = parameters[3];
+                    string newValue = parameters[4];
+                    if (table[row][col] == currentValue) {
+                        table[row][col] = newValue;
+                        msg = "+OK\r\n";
+                    } else {
+                        msg = "-ERR Conditional Write Failed\r\n";
+                    }
+                } else {
+                    msg = "-ERR Invalid CPUT parameters\r\n";
+                }
+            } else if (parameters[0] == "DELETE ") {
+                if (parameters.size() == 3) {
+                    string row = parameters[1];
+                    string col = parameters[2];
+                    table[row].erase(col);
+                    msg = "+OK\r\n";
+                } else {
+                    msg = "-ERR Invalid DELETE parameters\r\n";
+                }
+            } else {
+                msg = "-ERR Unknown command\r\n";
             }
 
             if (write(conFD, msg.c_str(), msg.length()) < 0){
@@ -270,43 +290,34 @@ int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
     parseArguments(argc, argv);
 
-    if (debug) {
-        printDebug("Arguments parsed");
-    }
-
-    diskFilePath = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(myTCP);
-    initialize(diskFilePath);
-
-    if (debug) {
-        printDebug("Initialization Done");
-    }
-
     if(aFlag) {
-        cerr<<"Name: Rishi Ghia, SEAS Login: ghiar"<<endl;
+        cerr<<"SEAS LOGIN HERE"<<endl;
         return 0;
     }
 
     parseServers("config.txt", servers);
 
     // Displaying the parsed data
-    for (const auto& server : servers) {
-        cout << "Server ID: " << server.first << endl;
-        for (const auto& info : server.second) {
+    for (auto& server : servers) {
+        for (auto& info : server.second) {
             if (server.first == 0) {
-                masterIP = info.ip;
-                masterTCP = info.tcpPort;
-                masterUDP = info.udpPort;
+                masterInfo = info;
             }
-            if (myTCP == info.tcpPort){
-                myUDP = info.udpPort;
-                cout<<"my udp is: " << to_string(myUDP)<<endl;
+            // current server
+            if (myInfo.tcpPort == info.tcpPort){ 
+                myInfo = info;
             }
-            cout << "  IP: " << info.ip << ", TCP Port: " << info.tcpPort << ", UDP Port: " << info.udpPort << endl;
+            // cout << "  IP: " << info.ip << ", TCP Port: " << info.tcpPort << ", UDP Port: " << info.udpPort << endl;
         }
     }
 
     // create a separate thread to send heartbeat to master node
-    thread heartbeat_thread(send_heartbeat, masterIP, masterUDP, myUDP);
+    thread heartbeat_thread(sendHeartbeat);
+    heartbeat_thread.detach();
+    //receive status message (pri/secondary)
+    thread status_thread(receiveStatus);
+    status_thread.detach();
+
 
     // create new socket
     int listenFD = socket(PF_INET, SOCK_STREAM, 0);
@@ -326,7 +337,7 @@ int main(int argc, char *argv[]){
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htons(INADDR_ANY);
-    servaddr.sin_port = htons(myTCP);
+    servaddr.sin_port = htons(myInfo.tcpPort);
 
     // bind socket to port
     if (bind(listenFD, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0){
@@ -381,7 +392,6 @@ int main(int argc, char *argv[]){
         }
         if (pthread_detach(data->threadID) < 0){ // detach the thread (kills it)
             fprintf(stderr, "Failed to detach thread: %s\n", strerror(errno));
-        };
+        };    
     }
-    heartbeat_thread.detach();
 }
