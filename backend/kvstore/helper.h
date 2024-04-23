@@ -13,7 +13,7 @@
 #include <arpa/inet.h>
 #include <unordered_map>
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 
 using namespace std;
 

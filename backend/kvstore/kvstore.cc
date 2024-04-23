@@ -373,76 +373,158 @@ void sendHeartbeat() {
     close(sockfd);
 }
 
-// thread function to run commands
+// OLD THREAD FUNC (READ 1 CHAR AT A TIME)
+// // thread function to run commands
+// void* threadFunc(void* arg) {
+//     struct thread_data* data = (struct thread_data*)arg;
+//     int conFD = data->conFD;
+
+//     char ch;
+//     string command;
+//     string msg;
+//     bool prevCharReturn = false;
+    
+//     while (true) { // constantly accept input from client, one char at a time
+//         if (read(conFD, &ch, 1) < 0){
+//             fprintf(stderr, "Failed to read: %s\n", strerror(errno));
+//             exit(1);
+//         }
+
+//         if (ch == '\r') { // if return carriage
+//             prevCharReturn = true;
+//         } 
+//         else if (ch == '\n' && prevCharReturn) { // if /r followed by /n, command is complete
+
+//             cout<<"COMMAND COMPLETE!!!"<<endl;
+//             if(debug){
+//                 fprintf(stderr, "[ %d ] C: %s\n", data->conFD, command.c_str());
+//             }
+//             cout<<command<<endl;
+
+//             vector<string> parameters = splitKvstoreCommand(command);
+//             // command is complete, execute it
+
+//             handleCommand(parameters, msg, command);
+
+//             if (currentNumberOfWritesForReplicaAndServer == CHECKPOINTING_THRESHOLD) {
+//                 checkpoint_table(diskFilePath);
+//                 currentNumberOfWritesForReplicaAndServer = 0;
+//             }
+
+//             if (write(conFD, msg.c_str(), msg.length()) < 0){
+//                 fprintf(stderr, "Failed to write: %s\n", strerror(errno));
+//                 exit(1);
+//             }                   
+//             if(debug){
+//                 fprintf(stderr, "[ %d ] S: %s\n", conFD, msg.c_str());
+//             }
+    
+//             // reset for the next command
+//             command.clear();
+//             prevCharReturn = false;
+//         }
+//         else {
+//             if (!prevCharReturn) { // Don't add '\r' to the command string
+//                 cout<<command.size()<<endl;
+//                 command += ch;
+//             }
+//         }
+//     }
+//     if (close(conFD) < 0){ // close connection
+//         fprintf(stderr, "Failed to close connection: %s\n", strerror(errno));
+//         exit(1);
+//     }
+
+//     if(debug){
+//         fprintf(stderr, "[ %d ] Connection closed \n", data->conFD);
+//     }
+
+//     // remove the socket from the open connections vector
+//     vector<int>::iterator it = find(openConnections.begin(), openConnections.end(), conFD);
+//     if (it != openConnections.end()) {
+//         openConnections.erase(it);
+//     }
+
+//     return NULL;
+// }
+
 void* threadFunc(void* arg) {
     struct thread_data* data = (struct thread_data*)arg;
     int conFD = data->conFD;
 
-    char ch;
+    char buffer[BUFFER_SIZE];
     string command;
     string msg;
-    bool prevCharReturn = false;
+    int bytesRead;
 
-    while (true) { // constantly accept input from client, one char at a time
-        if (read(conFD, &ch, 1) < 0){
+    while (true) {
+        bytesRead = read(conFD, buffer, BUFFER_SIZE);
+        if (bytesRead < 0) {
             fprintf(stderr, "Failed to read: %s\n", strerror(errno));
             exit(1);
+        } else if (bytesRead == 0) {
+            // Connection closed by client
+            break;
         }
-        if (ch == '\r') { // if return carriage
-            prevCharReturn = true;
-        } 
-        else if (ch == '\n' && prevCharReturn) { // if /r followed by /n, command is complete
-            if(debug){
-                fprintf(stderr, "[ %d ] C: %s\n", data->conFD, command.c_str());
-            }
-            cout<<command<<endl;
 
-            vector<string> parameters = splitKvstoreCommand(command);
-            // command is complete, execute it
+        for (int i = 0; i < bytesRead; ++i) {
+            char ch = buffer[i];
+            if (ch == '\r') {
+                // Assuming next char is '\n', check boundary
+                if (i + 1 < bytesRead && buffer[i + 1] == '\n') {
+                    cout << "COMMAND COMPLETE!!!" << endl;
+                    if (debug) {
+                        fprintf(stderr, "[ %d ] C: %s\n", conFD, command.c_str());
+                    }
+                    cout << command << endl;
 
-            handleCommand(parameters, msg, command);
+                    vector<string> parameters = splitKvstoreCommand(command);
+                    handleCommand(parameters, msg, command);
 
-            if (currentNumberOfWritesForReplicaAndServer == CHECKPOINTING_THRESHOLD) {
-                checkpoint_table(diskFilePath);
-                currentNumberOfWritesForReplicaAndServer = 0;
-            }
+                    if (currentNumberOfWritesForReplicaAndServer == CHECKPOINTING_THRESHOLD) {
+                        checkpoint_table(diskFilePath);
+                        currentNumberOfWritesForReplicaAndServer = 0;
+                    }
 
-            if (write(conFD, msg.c_str(), msg.length()) < 0){
-                fprintf(stderr, "Failed to write: %s\n", strerror(errno));
-                exit(1);
-            }                   
-            if(debug){
-                fprintf(stderr, "[ %d ] S: %s\n", conFD, msg.c_str());
-            }
-    
-            // reset for the next command
-            command.clear();
-            prevCharReturn = false;
-        }
-        else {
-            if (!prevCharReturn) { // Don't add '\r' to the command string
+                    if (write(conFD, msg.c_str(), msg.length()) < 0) {
+                        fprintf(stderr, "Failed to write: %s\n", strerror(errno));
+                        exit(1);
+                    }
+                    if (debug) {
+                        fprintf(stderr, "[ %d ] S: %s\n", conFD, msg.c_str());
+                    }
+
+                    // reset for the next command
+                    command.clear();
+                    i++; // Skip '\n' as it's already processed
+                } else {
+                    // Handle cases where '\n' might come in the next batch
+                    command += '\r'; // Keep '\r' in command as we're unsure about '\n'
+                }
+            } else {
                 command += ch;
             }
         }
     }
 
-    if (close(conFD) < 0){ // close connection
+    if (close(conFD) < 0) {
         fprintf(stderr, "Failed to close connection: %s\n", strerror(errno));
         exit(1);
     }
 
-    if(debug){
-        fprintf(stderr, "[ %d ] Connection closed \n", data->conFD);
+    if (debug) {
+        fprintf(stderr, "[ %d ] Connection closed \n", conFD);
     }
 
-    // remove the socket from the open connections vector
-    vector<int>::iterator it = find(openConnections.begin(), openConnections.end(), conFD);
+    // Remove the socket from the open connections vector
+    auto it = find(openConnections.begin(), openConnections.end(), conFD);
     if (it != openConnections.end()) {
         openConnections.erase(it);
     }
 
     return NULL;
 }
+
 
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
