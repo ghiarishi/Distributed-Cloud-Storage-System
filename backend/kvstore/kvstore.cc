@@ -460,6 +460,7 @@ void* threadFunc(void* arg) {
     while (true) {
         bytesRead = read(conFD, buffer, BUFFER_SIZE);
         if (bytesRead < 0) {
+            cout << "Command at failure is -> " << command << endl;
             fprintf(stderr, "Failed to read: %s\n", strerror(errno));
             exit(1);
         } else if (bytesRead == 0) {
@@ -476,7 +477,8 @@ void* threadFunc(void* arg) {
                     if (debug) {
                         fprintf(stderr, "[ %d ] C: %s\n", conFD, command.c_str());
                     }
-                    cout << command << endl;
+
+                    cout << "Command Size" << command.size() << endl;
 
                     vector<string> parameters = splitKvstoreCommand(command);
                     handleCommand(parameters, msg, command);

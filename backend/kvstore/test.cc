@@ -28,8 +28,10 @@ int main() {
     }
 
     // Open the file
-    std::ifstream file("/home/cis5050/Desktop/sp24-cis5050-T18/backend/kvstore/text.txt", ios::binary);
-    if (!file.is_open()) {
+    std::ifstream file1("/home/cis5050/sp24-cis5050-T18/backend/kvstore/test1.txt", ios::binary);
+    std::ifstream file2("/home/cis5050/sp24-cis5050-T18/backend/kvstore/test2.txt", ios::binary);
+    std::ifstream file3("/home/cis5050/sp24-cis5050-T18/backend/kvstore/test3.txt", ios::binary);
+    if (!file1.is_open()) {
         std::cerr << "Failed to open file\n";
         return 1;
     }
@@ -37,16 +39,42 @@ int main() {
     // Use a buffer to read and send data
     const size_t bufferSize = 4096;
     char buffer[bufferSize];
-    int count = 0;
+    long long count = 0;
 
-    while (file.read(buffer, bufferSize) || file.gcount() > 0) {
-        int bytesToSend = file.gcount();  // Get the number of bytes read from the file
+    while (file1.read(buffer, bufferSize) || file1.gcount() > 0) {
+        int bytesToSend = file1.gcount();  // Get the number of bytes read from the file
         if (write(sock, buffer, bytesToSend) != bytesToSend) {
             std::cerr << "Send failed\n";
             break;
         }
         count += bytesToSend;
-        usleep(5000); // Slightly longer sleep to avoid overloading network for large sends
+        usleep(3000); // Slightly longer sleep to avoid overloading network for large sends
+    }
+
+    // Sending end of message marker
+    write(sock, "\r\n", 2);
+
+    while (file2.read(buffer, bufferSize) || file2.gcount() > 0) {
+    int bytesToSend = file2.gcount();  // Get the number of bytes read from the file
+        if (write(sock, buffer, bytesToSend) != bytesToSend) {
+            std::cerr << "Send failed\n";
+            break;
+        }
+        count += bytesToSend;
+        usleep(3000); // Slightly longer sleep to avoid overloading network for large sends
+    }
+
+    // Sending end of message marker
+    write(sock, "\r\n", 2);
+
+     while (file3.read(buffer, bufferSize) || file3.gcount() > 0) {
+        int bytesToSend = file3.gcount();  // Get the number of bytes read from the file
+        if (write(sock, buffer, bytesToSend) != bytesToSend) {
+            std::cerr << "Send failed\n";
+            break;
+        }
+        count += bytesToSend;
+        usleep(30000); // Slightly longer sleep to avoid overloading network for large sends
     }
 
     // Sending end of message marker
@@ -55,7 +83,9 @@ int main() {
     cout << "Total bytes sent: " << count << endl;
 
     // Close the file and the socket
-    file.close();
+    file1.close();
+    file2.close();
+    file3.close();
     close(sock);
 
     return 0;
