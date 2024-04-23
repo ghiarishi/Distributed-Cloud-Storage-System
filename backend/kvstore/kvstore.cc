@@ -266,6 +266,33 @@ void receiveStatus() {
             if (message.substr(0, posColon) == "PRIMARY"){ // primary
                 cout<<"Set to Primary in replica group " << to_string(replicaGroup)<<endl;
                 myInfo.isPrimary = true;
+                myInfo.isDead = false;  
+
+                for (auto info:servers[replicaGroup]){
+                    if (info.tcpPort == myInfo.tcpPort && info.ip == myInfo.ip){
+                        info = myInfo;
+                    }
+                }
+
+                size_t posAt = message.find("@");
+
+                // if secondary server info provided, then mark alive
+                if (posAt != std::string::npos) {
+                    string ip_port = message.substr(posColon+1, posAt - posColon - 1);
+
+                    string ipTemp = ip_port.substr(0, ip_port.find(":"));
+
+                    int tcpTemp = stoi(ip_port.substr(ip_port.find(":") + 1));
+
+                    cout<<"Primary marks secondary alive in group " << to_string(replicaGroup)<<endl;
+
+                    for (auto info:servers[replicaGroup]){
+                        if (info.tcpPort == tcpTemp && info.ip == ipTemp){
+                            info.isDead = false;
+                            info.isPrimary = false;
+                        }
+                    }
+                }
             } 
             else{ // secondary
                 size_t posAt = message.find("@");
@@ -276,13 +303,22 @@ void receiveStatus() {
 
                 cout<<"Set to Secondary in replica group " << to_string(replicaGroup)<<endl;
 
+                myInfo.isPrimary = false;
+                myInfo.isDead = false;  
+
                 for (auto info:servers[replicaGroup]){
+                    if (info.tcpPort == myInfo.tcpPort && info.ip == myInfo.ip){
+                        info = myInfo;
+                    }
+
                     if (info.tcpPort == tcpTemp && info.ip == ipTemp){
                         info.isPrimary = true;
                         primaryInfo = info;
                     }
                 }
             }
+
+    
 
             // SERVER IS DEAD
             size_t posSemi = message.find(";");
@@ -291,8 +327,8 @@ void receiveStatus() {
                 auto& serverList = servers[replicaGroup]; // Reference to the vector of servers in the specified group
                 for (auto it = serverList.begin(); it != serverList.end(); ++it) {
                     if (it->tcpPort == deadTCP){
-                        serverList.erase(it);
-                        cout << "Dead server removed from map" << endl;
+                        it->isDead = true;
+                        cout << "Server marked as dead" << endl;
                     } 
                 }
             }
@@ -326,7 +362,10 @@ void sendHeartbeat() {
         if (send_status < 0) {
             cerr << "Error sending heartbeat" << endl;
         }
-        // cout<<"heartbeat"<<endl;
+
+        // time_t currentTime = time(nullptr); // for printing purposes
+        // cout << message << " at " << ctime(&currentTime);
+        // cout<<"heartbeat at " << currentTime <<endl;
 
         this_thread::sleep_for(chrono::seconds(HEARTBEAT_INTERVAL)); // Send every 2 seconds, adjusted from your comment
     }

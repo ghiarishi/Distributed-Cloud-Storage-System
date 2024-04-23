@@ -31,7 +31,7 @@ struct ServerInfo {
     int udpPort;
     int udpPort2;
     bool isPrimary = false; // default false
-    bool isDead = false;
+    bool isDead = true;
     int replicaGroup;
 };
 

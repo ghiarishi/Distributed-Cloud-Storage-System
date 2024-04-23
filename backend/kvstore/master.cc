@@ -18,7 +18,7 @@ map<int, ServerInfo> primaryServers;
 unordered_map<string, chrono::steady_clock::time_point> last_heartbeat; // repID:tcpPort mapped to time
 mutex heartbeat_mutex;
 
-void sendIsPrimary(bool isPrimary, ServerInfo recv, ServerInfo primary, ServerInfo deadInfo) {
+void sendIsPrimary(bool isPrimary, ServerInfo recvInfo, ServerInfo primaryInfo, ServerInfo deadInfo) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
         cerr << "Error opening socket" << endl;
@@ -27,8 +27,8 @@ void sendIsPrimary(bool isPrimary, ServerInfo recv, ServerInfo primary, ServerIn
 
     struct sockaddr_in servaddr;
     servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(recv.udpPort2);
-    servaddr.sin_addr.s_addr = inet_addr(recv.ip.c_str());
+    servaddr.sin_port = htons(recvInfo.udpPort2);
+    servaddr.sin_addr.s_addr = inet_addr(recvInfo.ip.c_str());
 
     string message;
     
@@ -36,13 +36,41 @@ void sendIsPrimary(bool isPrimary, ServerInfo recv, ServerInfo primary, ServerIn
         message = "PRIMARY:";
     } else { 
         // new primary server information
-        message = "SECONDARY:" + primary.ip + ":" + to_string(primary.tcpPort) + "@";
+        message = "SECONDARY:" + primaryInfo.ip + ":" + to_string(primaryInfo.tcpPort) + "@";
     }
     
     // information about which server is dead
     if (deadInfo.isDead) {
         message += ";" + deadInfo.ip + ":" + to_string(deadInfo.tcpPort);
     }
+    message.push_back('\0');
+
+    int send_status = sendto(sockfd, message.c_str(), message.length(), 0,
+                             (struct sockaddr*)&servaddr, sizeof(servaddr));
+    if (send_status < 0) {
+        cerr << "Error sending server status" << endl;
+    }
+
+    close(sockfd);
+}
+
+
+void sendNewSecondaryInfoToPrimary(ServerInfo primaryInfo, ServerInfo secondaryInfo) {
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket" << endl;
+        return;
+    }
+
+    struct sockaddr_in servaddr;
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(primaryInfo.udpPort2);
+    servaddr.sin_addr.s_addr = inet_addr(primaryInfo.ip.c_str());
+
+    string message;
+    
+    message = "PRIMARY:" + secondaryInfo.ip + ":" + to_string(secondaryInfo.tcpPort) + "@";
+
     message.push_back('\0');
 
     int send_status = sendto(sockfd, message.c_str(), message.length(), 0,
@@ -184,19 +212,32 @@ void recvHeartbeat() {
             // if no existing primary server, then 
             for (auto& info : servers[replicaGroup]) {
                 if (info.tcpPort == senderTCP) {
+                    tempInfo = info;
+                    
+                    // if server already alive, don't bother
+                    if (!info.isDead){
+                        continue;
+                    }
+
+                    // if server newly alive, or revived, then do this
 
                     info.isDead = false;
 
-                    tempInfo = info;
                     // assign the first connecting node of rep grp as primary
                     if (primaryServers.find(replicaGroup) == primaryServers.end()){
                         info.isPrimary = true;
                         primaryServers[replicaGroup] = info;
                         cout<<to_string(senderTCP)<<" assigned as PRIMARY in group "<<to_string(replicaGroup)<<endl;
                     } 
+
                     ServerInfo deadInfo;
                     deadInfo.isDead = false;
                     sendIsPrimary(info.isPrimary, info, primaryServers[info.replicaGroup], deadInfo);
+
+                    if(!info.isPrimary){
+                        // send to primary saying I AM SECONDARY NEW
+                        sendNewSecondaryInfoToPrimary(primaryServers[info.replicaGroup], info);
+                    }
                 }
             }
         
