@@ -26,7 +26,7 @@ bool debug = false; // default no debugging
 int replicaGroup = 0;
 
 struct ServerInfo {
-    std::string ip;
+    string ip;
     int tcpPort;
     int udpPort;
     int udpPort2;
@@ -122,39 +122,39 @@ string extractValue(const string& data) {
 }
 
 
-void parseServers(const std::string& filename, ServerMap& servers) {
-    std::ifstream file(filename);
+void parseServers(const string& filename, ServerMap& servers) {
+    ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Error opening file" << std::endl;
+        cerr << "Error opening file" << endl;
         return;
     }
 
-    std::string line;
-    while (std::getline(file, line)) {
-        std::istringstream iss(line);
-        std::vector<std::string> parts;
-        std::string part;
-        while (std::getline(iss, part, ',')) {
+    string line;
+    while (getline(file, line)) {
+        istringstream iss(line);
+        vector<string> parts;
+        string part;
+        while (getline(iss, part, ',')) {
             size_t pos = part.find(':');
-            if (pos != std::string::npos) {
+            if (pos != string::npos) {
                 parts.push_back(part.substr(pos + 1));
             } else {
-                std::cerr << "Invalid format in part: " << part << std::endl;
+                cerr << "Invalid format in part: " << part << endl;
             }
         }
 
         if (parts.size() != 5) {
-            std::cerr << "Invalid line format: " << line << std::endl;
+            cerr << "Invalid line format: " << line << endl;
             continue;  // Skip malformed lines
         }
 
         ServerInfo info;
     
-        info.replicaGroup = std::stoi(parts[0]);
+        info.replicaGroup = stoi(parts[0]);
         info.ip = parts[1];
-        info.tcpPort = std::stoi(parts[2]);
-        info.udpPort = std::stoi(parts[3]);
-        info.udpPort2 = std::stoi(parts[4]);
+        info.tcpPort = stoi(parts[2]);
+        info.udpPort = stoi(parts[3]);
+        info.udpPort2 = stoi(parts[4]);
 
         servers[info.replicaGroup].push_back(info);
 
