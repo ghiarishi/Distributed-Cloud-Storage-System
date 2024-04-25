@@ -686,18 +686,17 @@ void* threadFunc(void* arg) {
             if (ch == '\r') {
                 // Assuming next char is '\n', check boundary
                 if (i + 1 < bytesRead && buffer[i + 1] == '\n') {
-                    cout << "COMMAND COMPLETE!!!" << endl;
+                    // cout << "COMMAND COMPLETE!!!" << endl;
                     if (debug) {
                         fprintf(stderr, "[ %d ] C: %s\n", conFD, command.c_str());
                     }
 
-                    cout << "Command Size" << command.size() << endl;
 
                     vector<string> parameters = splitKvstoreCommand(command);
                     bool receivedFromPrimary = false;
                     bool receivedFromSecondary = false;
                     bool receivedFromFrontend = false;
-                    cout << "command receieved size is -> " << command.size() << endl;
+                    cout << "Command receieved size is -> " << command.size() << endl;
                     if (parameters.size() >= 4 && (parameters[0] == "PUT " || parameters[0] == "CPUT " || parameters[0] == "DELETE ")) {
                         if (parameters[parameters.size()-1] == "PRIMARY") {
                             receivedFromPrimary = true;
