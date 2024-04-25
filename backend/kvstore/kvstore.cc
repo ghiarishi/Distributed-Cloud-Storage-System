@@ -245,10 +245,10 @@ bool currentIsPrimary() {
 }
 
 void handleCommand(vector<string> parameters, string &msg, string command = "", bool receivedFromPrimary = false, bool receivedFromSecondary = false, bool receivedFromFrontend = true) {
-    cout << "command -> " << command << endl;
-    cout << " receieved from primary -> " << receivedFromPrimary << endl;
-    cout << " receieved from frontend -> " << receivedFromFrontend << endl;
-    cout << " receieved from secondary -> " << receivedFromSecondary << endl;
+    // cout << "command -> " << command << endl;
+    // cout << " receieved from primary -> " << receivedFromPrimary << endl;
+    // cout << " receieved from frontend -> " << receivedFromFrontend << endl;
+    // cout << " receieved from secondary -> " << receivedFromSecondary << endl;
     
     if (parameters[0] == "PUT ") {
         if (parameters.size() >= 4 ) {
@@ -366,12 +366,40 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
             msg = "-ERR Invalid CPUT parameters\r\n";
         }
     } else if (parameters[0] == "DELETE ") {
-        if (parameters.size() == 3) {
-            string row = parameters[1];
-            string col = parameters[2];
-            table[row].erase(col);
-            msg = "+OK\r\n";
-            handleAppend(command);
+        if (parameters.size() >= 3) {
+            if(currentIsPrimary()) {
+                cout << "Received command size -> " << command.size() << " in primary" << endl;
+                // Write to in-memory map , set msg as OK and do handleAppend(command) - setting msg as OK will send OK back to the sender
+                string tempCommand = parameters[0] + parameters[1] + "," + parameters[2] + ",PRIMARY\r\n";
+                if(forwardToAllSecondaryServers(tempCommand)) {
+                    cout << "Succeeded forwarding to all secondary and received +OK" << endl;
+                    string row = parameters[1];
+                    string col = parameters[2];
+                    table[row].erase(col);
+                    msg = "+OK\r\n";
+                    string appendCommand = parameters[0] + parameters[1] + "," + parameters[2];
+                    handleAppend(appendCommand);
+                }
+                else {
+                    msg = "-ERR Writing PUT values to secondary\r\n";
+                }        
+            } 
+            // This else if block is for when current is primary and received from secondary
+            else if (!currentIsPrimary() && receivedFromFrontend) {
+                string tempCommand = parameters[0] + parameters[1] + "," + parameters[2] + ",SECONDARY\r\n";
+                // First forward to all secondaries, wait for OK response from all of them, then write to in-memory and call handleAppend and assign to msg
+                if(forwardToPrimary(tempCommand)) {
+                    msg = "+OK\r\n";
+                }
+            } else if(!currentIsPrimary() && receivedFromPrimary) {
+                cout << "Received command size " << command.size() << " from primary +OK" << endl;
+                string row = parameters[1];
+                string col = parameters[2];
+                table[row].erase(col);
+                msg = "+OK\r\n";
+                string appendCommand = parameters[0] + parameters[1] + "," + parameters[2];
+                handleAppend(appendCommand);
+            }
         } else {
             msg = "-ERR Invalid DELETE parameters\r\n";
         }
@@ -391,7 +419,7 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
     } else {
         msg = "-ERR Unknown command\r\n";
     }
-    cout << "Mesage sending from handleCommand -> " << msg << endl;
+    // cout << "Mesage sending from handleCommand -> " << msg << endl;
 }
 
 // Function to initialize in-memory map - which reads diskfile and replays the checkpointing file
@@ -670,7 +698,7 @@ void* threadFunc(void* arg) {
                     bool receivedFromSecondary = false;
                     bool receivedFromFrontend = false;
                     cout << "command receieved size is -> " << command.size() << endl;
-                    if (parameters.size() >= 5) {
+                    if (parameters.size() >= 4 && (parameters[0] == "PUT " || parameters[0] == "CPUT " || parameters[0] == "DELETE ")) {
                         if (parameters[parameters.size()-1] == "PRIMARY") {
                             receivedFromPrimary = true;
                             cout << "Received from PRIMARY is TRUE" <<endl;

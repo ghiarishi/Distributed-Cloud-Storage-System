@@ -54,7 +54,6 @@ void sendIsPrimary(bool isPrimary, ServerInfo recvInfo, ServerInfo primaryInfo, 
     close(sockfd);
 }
 
-
 void sendNewSecondaryInfoToPrimary(ServerInfo primaryInfo, ServerInfo secondaryInfo) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -81,7 +80,6 @@ void sendNewSecondaryInfoToPrimary(ServerInfo primaryInfo, ServerInfo secondaryI
 
     close(sockfd);
 }
-
 
 void check_heartbeats() {
     while (true) {
