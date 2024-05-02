@@ -11,6 +11,9 @@
 #include <iostream>
 #include <string>
 #include <map>
+#include <vector>
+#include <fstream>
+#include <sstream>
 
 using namespace std;
 
@@ -31,7 +34,20 @@ int MAILBOX = 3;
 int DRIVE = 4;
 int DFILE = 5;
 int EMAIL = 6;
+int ADMIN = 7;
 
+struct Node {
+    int id;
+    string ip;
+    int tcp;
+    int udp;
+    int udp2;
+    string name;
+	bool isAlive;
+
+    Node(int id, string ip, int tcp, int udp, int udp2, string name)
+        : id(id), ip(ip), tcp(tcp), udp(udp), udp2(udp2), name(name) {}
+};
 
 /////////////////////////////////////
 //								   //
@@ -39,6 +55,43 @@ int EMAIL = 6;
 //								   //
 /////////////////////////////////////
 
+// parse file 
+vector<Node> getBackendNodes(string filename) {
+    vector<Node> nodes;
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "Error opening file: " << filename << endl;
+        return nodes; // return an empty vector if file couldn't be opened
+    }
+
+    string line;
+    while (getline(file, line)) {
+        stringstream ss(line);
+        string token;
+
+        // Parse each line
+        int id, tcp, udp, udp2;
+        string ip;
+        getline(ss, token, ','); // id
+        id = stoi(token.substr(token.find(":") + 1));
+        getline(ss, token, ','); // ip
+        ip = token.substr(token.find(":") + 1);
+        getline(ss, token, ','); // tcp
+        tcp = stoi(token.substr(token.find(":") + 1));
+        getline(ss, token, ','); // udp
+        udp = stoi(token.substr(token.find(":") + 1));
+        getline(ss, token, ','); // udp2
+        udp2 = stoi(token.substr(token.find(":") + 1));
+
+        // Construct Node object and push it to the vector
+        nodes.emplace_back(id, ip, tcp, udp, udp2, line);
+
+		printf("The whole line is %s\n" , line.c_str());
+    }
+
+    file.close();
+    return nodes;
+}
 // Parse login data
 tuple<string, string> parseLoginData(string data_str) {
 
@@ -227,7 +280,6 @@ string sendFile(string username, string item) {
 	return reply;
 }
 
-
 // render a webpage displaying http errors
 string renderErrorPage(int err_code) {
 
@@ -257,6 +309,41 @@ string renderErrorPage(int err_code) {
 	return reply;
 }
 
+string renderAdminPage()
+{  
+    printf("calling get backend nodes\n");
+    vector<Node> backendNodes = getBackendNodes("../backend/kvstore/config.txt");
+    
+    string content = "";
+    content += "<html>\n";
+    content += "<head><title>Admin Console</title></head>\n";
+    content += "<body>\n";
+    content += "<h1>Admin Console</h1>\n";
+
+    // Display backend nodes
+    content += "<h2>Backend Nodes</h2>\n";
+    content += "<ul>\n";
+    for (const Node &node : backendNodes)
+    {
+        content += "<li>" + node.name + " - Status: " + (node.isAlive ? "Alive" : "Down") + " ";
+        // Add buttons for each node
+        content += "<form action=\"/action\" method=\"post\">";
+        content += "<input type=\"hidden\" name=\"node_name\" value=\"" + node.name + "\">";
+        content += "<input type=\"submit\" name=\"action\" value=\"Disable\">";
+        content += "<input type=\"submit\" name=\"action\" value=\"Restart\">";
+        content += "</form>";
+        content += "</li>\n";
+    }
+    content += "</ul>\n";
+
+    string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
+                    to_string(content.length()) + "\r\n\r\n";
+    string reply = header + content;
+
+    return reply;
+}
+
+
 
 string generateReply(int reply_code, string username = "", string item = "") {
 	if (reply_code == LOGIN) {
@@ -279,6 +366,9 @@ string generateReply(int reply_code, string username = "", string item = "") {
 	}
 	else if (reply_code == EMAIL) {
 		return renderEmailPage(username, item);
+	}
+	else if (reply_code == ADMIN) {
+		return renderAdminPage();
 	}
 
     string reply = renderErrorPage(reply_code);
@@ -460,6 +550,10 @@ void *thread_worker(void *fd) {
                 	// login page
                 	if (strcmp(url, "/") == 0) {
                 		reply_code = LOGIN;
+                	}
+
+					else if (strcmp(url+strlen(url)-strlen("/admin"), "/admin") == 0) {
+                		reply_code = ADMIN;
                 	}
 
                 	// menu page
