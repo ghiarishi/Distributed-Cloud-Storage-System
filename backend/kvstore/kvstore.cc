@@ -25,6 +25,9 @@ using namespace std;
 ServerInfo masterInfo;
 ServerInfo primaryInfo;
 
+bool currentlyInitializing = false;
+bool currentlyReadingFromCheckpointFile = false;
+
 int currentNumberOfWritesForReplicaAndServer = 0;
 string diskFilePath;
 
@@ -85,7 +88,7 @@ vector<string> split(const string& str, char delimiter) {
 
 // Append the write command with parameters at the end of the checkpoint log file (along with parameters - PUT, CPUT and DELETE)
 void handleAppend(string command) {
-    if (command.size() > 0) {
+    if (command.size() > 0 && !currentlyReadingFromCheckpointFile) {
         appendToFile(diskFilePath + "-checkpoint", command);
         currentNumberOfWritesForReplicaAndServer++;
     }
@@ -205,6 +208,26 @@ bool forwardToAllSecondaryServers(string command) {
             } else {
                 return false;
             }
+        } else if (it->isPrimary == false && it->isDead == true) {
+            /*
+                TODO : 
+              - FileName = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(it->tcpPort) + "-deadServerLog"
+                In the variable command find the last instance of ",PRIMARY" and extract everything before it and call it original command
+                Call appendToFile with the fileName and the originalCommand as parameters
+            */
+
+            // Construct the file name
+            string fileName = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(it->tcpPort) + "-deadServerLog";
+
+            // Find the last instance of ",PRIMARY" in the command string
+            size_t pos = command.rfind(",PRIMARY");
+            if (pos != string::npos) {
+                // Extract the original command
+                string originalCommand = command.substr(0, pos);
+
+                // Append the original command to the dead server log file
+                appendToFile(fileName, originalCommand);
+            }
         }
     }
     return true;
@@ -252,6 +275,16 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
     
     if (parameters[0] == "PUT ") {
         if (parameters.size() >= 4 ) {
+            if(currentlyInitializing) {
+                string row = parameters[1];
+                string col = parameters[2];
+                string value = parameters[3];  // Here, value is directly used as a string
+                table[row][col] = value;
+                msg = "+OK\r\n";
+                string appendCommand = parameters[0] + parameters[1] + "," + parameters[2] + "," + parameters[3];
+                handleAppend(appendCommand);
+                return;
+            }
             /*
                 TODO : 
                 - Add check if I am primary then I write to myself and send request to all alive secondary, 
@@ -311,6 +344,21 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
         }
     } else if (parameters[0] == "CPUT ") {
         if (parameters.size() >= 5) {
+            if(currentlyInitializing) {
+                string row = parameters[1];
+                string col = parameters[2];
+                string currentValue = parameters[3];
+                string newValue = parameters[4];
+                if (table[row][col] == currentValue) {
+                    table[row][col] = newValue;
+                    msg = "+OK\r\n";
+                    string appendCommand = parameters[0] + parameters[1] + "," + parameters[2] + "," + parameters[3] + "," + parameters[4];
+                    handleAppend(appendCommand);
+                } else {
+                    msg = "-ERR Conditional Write Failed\r\n";
+                }
+                return ;
+            }
             /*
                 TODO : 
                 - Add check if I am primary then I write to myself and send request to all alive secondary, 
@@ -367,6 +415,15 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
         }
     } else if (parameters[0] == "DELETE ") {
         if (parameters.size() >= 3) {
+            if(currentlyInitializing) {
+                string row = parameters[1];
+                string col = parameters[2];
+                table[row].erase(col);
+                msg = "+OK\r\n";
+                string appendCommand = parameters[0] + parameters[1] + "," + parameters[2];
+                handleAppend(appendCommand);
+                return;
+            }
             if(currentIsPrimary()) {
                 cout << "Received command size -> " << command.size() << " in primary" << endl;
                 // Write to in-memory map , set msg as OK and do handleAppend(command) - setting msg as OK will send OK back to the sender
@@ -381,7 +438,7 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                     handleAppend(appendCommand);
                 }
                 else {
-                    msg = "-ERR Writing PUT values to secondary\r\n";
+                    msg = "-ERR DELETING values from all secondary\r\n";
                 }        
             } 
             // This else if block is for when current is primary and received from secondary
@@ -422,9 +479,38 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
     // cout << "Mesage sending from handleCommand -> " << msg << endl;
 }
 
+bool crashRecoveryFunction(string path) {
+    // Create the file if it doesn't exist and open it for appending
+    fstream file(path + "-deadServerLog", ios::out | ios::app);
+    if (!file.is_open()) {
+        cerr << "Error opening data file" << endl;
+        return false;
+    }
+    // If the file exists, close it and reopen it for reading
+    file.close();
+
+    ifstream crashFilePath(path + "-deadServerLog");  //  Adjust filename if needed
+    if (crashFilePath.is_open()) {
+        string line;
+        string msg;
+        while (getline(crashFilePath, line)) {
+            vector<string> parameters = splitKvstoreCommand(line);
+            handleCommand(parameters, msg);
+        }
+        crashFilePath.close();
+        // Truncate the file after reading
+        ofstream truncateFile(path + "-deadServerLog", ofstream::trunc);
+        truncateFile.close();
+        cout << "Crash recovery (true) from " << path << "-deadServerLog" << endl;
+        return true;
+    }
+    cout << "Crash recovery (true) from " << path << "-deadServerLog" << endl;
+    return false;
+}
 // Function to initialize in-memory map - which reads diskfile and replays the checkpointing file
 // TODO : Contact primary server and see if it is out of sync with them and update accordingly
 void initialize(string path) {
+
     // Create the file if it doesn't exist and open it for appending
     fstream file(path, ios::out | ios::app);
 
@@ -473,11 +559,13 @@ void initialize(string path) {
     if (logFile.is_open()) {
         string line;
         string msg;
+        currentlyReadingFromCheckpointFile = true;
         while (getline(logFile, line)) {
             currentNumberOfWritesForReplicaAndServer++;
             vector<string> parameters = splitKvstoreCommand(line);
             handleCommand(parameters, msg);
         }
+        currentlyReadingFromCheckpointFile = false;
         logFile.close();
     } else {
         cerr << "Error opening checkpoint log file" << endl;
@@ -488,6 +576,20 @@ void initialize(string path) {
         currentNumberOfWritesForReplicaAndServer = 0;
         if (debug) {
             printDebug("Checkpointing done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
+        }
+    }
+
+    // Should we perform crash recovery ?
+    if (crashRecoveryFunction(path)) {
+        if(debug) {
+            printDebug("Crash Recovery Done");
+        }
+        if (currentNumberOfWritesForReplicaAndServer >= CHECKPOINTING_THRESHOLD) {
+            checkpoint_table(path);
+            currentNumberOfWritesForReplicaAndServer = 0;
+            if (debug) {
+                printDebug("Check done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
+            }
         }
     }
 }
@@ -589,11 +691,15 @@ void receiveStatus() {
             // SERVER IS DEAD
             size_t posSemi = message.find(";");
             if (posSemi != string::npos) {
-                int deadTCP = stoi(message.substr(posSemi + 1));
+                string ipAndTCP = message.substr(posSemi + 1);
+                string tempIp = ipAndTCP.substr(0, ipAndTCP.find(":"));
+                int deadTCP = stoi(ipAndTCP.substr(ipAndTCP.find(":")+1));
+                cout << "Dead TCP -> " << deadTCP << endl;
                 auto& serverList = servers[replicaGroup]; // Reference to the vector of servers in the specified group
                 for (auto it = serverList.begin(); it != serverList.end(); ++it) {
-                    if (it->tcpPort == deadTCP){
+                    if (it->ip == tempIp && it->tcpPort == deadTCP){
                         it->isDead = true;
+                        it->isPrimary = false;
                         cout << "Server marked as dead" << endl;
                     } 
                 }
@@ -633,7 +739,7 @@ void sendHeartbeat() {
         // cout << message << " at " << ctime(&currentTime);
         // cout<<"heartbeat at " << currentTime <<endl;
 
-        this_thread::sleep_for(chrono::seconds(HEARTBEAT_INTERVAL)); // Send every 2 seconds, adjusted from your comment
+        this_thread::sleep_for(chrono::milliseconds(HEARTBEAT_INTERVAL)); // Send every 2 seconds, adjusted from your comment
     }
 
     close(sockfd);
@@ -690,7 +796,6 @@ void* threadFunc(void* arg) {
                     if (debug) {
                         fprintf(stderr, "[ %d ] C: %s\n", conFD, command.c_str());
                     }
-
 
                     vector<string> parameters = splitKvstoreCommand(command);
                     bool receivedFromPrimary = false;
@@ -768,7 +873,9 @@ int main(int argc, char *argv[]){
     parseArguments(argc, argv);
 
     diskFilePath = "./storage/RP" + to_string(replicaGroup) + "-" + to_string(myInfo.tcpPort);
+    currentlyInitializing = true;
     initialize(diskFilePath);
+    currentlyInitializing = false;
 
     if(aFlag) {
         cerr<<"SEAS LOGIN HERE"<<endl;

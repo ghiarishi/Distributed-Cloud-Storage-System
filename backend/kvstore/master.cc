@@ -15,8 +15,121 @@
 using namespace std;
 
 map<int, ServerInfo> primaryServers;
+unordered_map<int, int> nextServerRoundRobin; // which server to send to frontend next for each repica group
 unordered_map<string, chrono::steady_clock::time_point> last_heartbeat; // repID:tcpPort mapped to time
 mutex heartbeat_mutex;
+
+// Function to handle incoming TCP connections from frontend servers
+void handleIncomingRequests() {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket: " << strerror(errno) << endl;
+        return;
+    }
+
+    // ensure socket closes, and new socket can be opened
+    int option = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR|SO_REUSEPORT, &option, sizeof(option)) < 0){
+        fprintf(stderr, "Failed to setsockopt: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+    servaddr.sin_port = htons(myInfo.tcpPort);
+
+    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        cerr << "Bind failed: " << strerror(errno) << endl;
+        close(sockfd);
+        return;
+    }
+
+    listen(sockfd, 5);
+
+    while (true) {  // main accept() loop
+        int conFD = accept(sockfd, NULL, NULL);
+        if (conFD < 0) {
+            cerr << "Error on accept: " << strerror(errno) << endl;
+            continue;
+        }
+
+        char buffer[BUFFER_SIZE];
+        string command;
+        int bytesRead;
+
+        bytesRead = read(conFD, buffer, sizeof(buffer));
+        if (bytesRead < 0) {
+            cerr << "Failed to read: " << strerror(errno) << endl;
+        } else if (bytesRead == 0) {
+            // connection closed by client
+        } else {
+            for (int i = 0; i < bytesRead; ++i) {
+                char ch = buffer[i];
+                if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
+                    // process command
+                    cout<<"COMMAND: " <<command<<endl;
+                    if (command.substr(0,11) == "GET_SERVER:") {
+                        string username = command.substr(11);
+                        
+                        int replicaGroup;
+                        char firstChar = std::tolower(username[0]); // Ensure the comparison is case insensitive
+
+                        if (firstChar >= 'a' && firstChar <= 'i') {
+                            replicaGroup = 1;
+                        } else if (firstChar >= 'j' && firstChar <= 'r') {
+                            replicaGroup = 2;
+                        }  else if ((firstChar >= 's' && firstChar <= 'z') || (firstChar >= '0' && firstChar <= '9')) {
+                            replicaGroup = 3;
+                        } 
+
+                        // Initialize a flag to indicate if a live server was found
+                        bool liveServerFound = false;
+                        string response;
+
+                        // Get the starting index for round-robin to ensure all servers are checked
+                        int startServerIndex = nextServerRoundRobin[replicaGroup];
+                        int currentServerIndex = startServerIndex;
+                        int numServers = servers[replicaGroup].size();
+
+                        do {
+                            ServerInfo selectedServer = servers[replicaGroup][currentServerIndex];
+
+                            // Check if the current server is alive
+                            if (!selectedServer.isDead) {
+                                response = "SERVER_INFO:" + selectedServer.ip + ":" + to_string(selectedServer.tcpPort) + "\r\n";
+                                // Update the round-robin index to the next server for future requests
+                                nextServerRoundRobin[replicaGroup] = (currentServerIndex + 1) % numServers;
+                                liveServerFound = true;
+                                break; // Exit the loop as a live server has been found
+                            }
+
+                            // Move to the next server in the round-robin
+                            currentServerIndex = (currentServerIndex + 1) % numServers;
+                        } while (currentServerIndex != startServerIndex);
+
+                        // Check if no live servers were found
+                        if (!liveServerFound) {
+                            response = "-ERR NO_SERVERS_ALIVE\r\n";
+                        }
+
+                        // Send the response to the frontend
+                        write(conFD, response.c_str(), response.length());
+                    }
+                    command.clear();
+                    i++; // Skip '\n'
+                } else {
+                    command += ch;
+                }
+            }
+        }
+
+        close(conFD);  // Close the handled connection
+    }
+
+    close(sockfd);
+}
 
 void sendIsPrimary(bool isPrimary, ServerInfo recvInfo, ServerInfo primaryInfo, ServerInfo deadInfo) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -83,13 +196,13 @@ void sendNewSecondaryInfoToPrimary(ServerInfo primaryInfo, ServerInfo secondaryI
 
 void check_heartbeats() {
     while (true) {
-        this_thread::sleep_for(chrono::seconds(1)); // Check every second
+        this_thread::sleep_for(chrono::milliseconds(HEARTBEAT_INTERVAL)); // Check every second
         auto now = chrono::steady_clock::now();
 
         lock_guard<mutex> lock(heartbeat_mutex);
         for (auto it = last_heartbeat.begin(); it != last_heartbeat.end(); ) {
             // server is dead
-            if (chrono::duration_cast<chrono::seconds>(now - it->second).count() > DEAD_THRESHOLD) {
+            if (chrono::duration_cast<chrono::milliseconds>(now - it->second).count() > DEAD_THRESHOLD) {
                 string key = it->first;
                 
                 // repID;ip:port
@@ -253,6 +366,11 @@ void recvHeartbeat() {
 
 int main(){
     parseServers("config.txt", servers);
+        
+    // Initialize round-robin index to 0 for each replica group
+    for (const auto& pair : servers) {
+        nextServerRoundRobin[pair.first] = 0;  
+    }
 
     // Displaying the parsed data
     for (const auto& server : servers) {
@@ -264,8 +382,12 @@ int main(){
         }
     }
 
+    // listen for frontend requests
+    thread requestHandlerHelper(handleIncomingRequests);
+    requestHandlerHelper.detach();
+
     // listen for heartbeats
     recvHeartbeat();
- 
+
     return 0;
 }
