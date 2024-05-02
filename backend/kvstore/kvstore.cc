@@ -480,7 +480,6 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
 }
 
 bool crashRecoveryFunction(string path) {
-    cout << "Crash recovery from " << path << "-deadServerLog" << endl;
     // Create the file if it doesn't exist and open it for appending
     fstream file(path + "-deadServerLog", ios::out | ios::app);
     if (!file.is_open()) {
@@ -502,8 +501,10 @@ bool crashRecoveryFunction(string path) {
         // Truncate the file after reading
         ofstream truncateFile(path + "-deadServerLog", ofstream::trunc);
         truncateFile.close();
+        cout << "Crash recovery (true) from " << path << "-deadServerLog" << endl;
         return true;
     }
+    cout << "Crash recovery (true) from " << path << "-deadServerLog" << endl;
     return false;
 }
 // Function to initialize in-memory map - which reads diskfile and replays the checkpointing file
@@ -586,10 +587,10 @@ void initialize(string path) {
         if (currentNumberOfWritesForReplicaAndServer >= CHECKPOINTING_THRESHOLD) {
             checkpoint_table(path);
             currentNumberOfWritesForReplicaAndServer = 0;
-        if (debug) {
-            printDebug("Check done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
+            if (debug) {
+                printDebug("Check done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
+            }
         }
-    }
     }
 }
 
@@ -738,7 +739,7 @@ void sendHeartbeat() {
         // cout << message << " at " << ctime(&currentTime);
         // cout<<"heartbeat at " << currentTime <<endl;
 
-        this_thread::sleep_for(chrono::seconds(HEARTBEAT_INTERVAL)); // Send every 2 seconds, adjusted from your comment
+        this_thread::sleep_for(chrono::milliseconds(HEARTBEAT_INTERVAL)); // Send every 2 seconds, adjusted from your comment
     }
 
     close(sockfd);
@@ -795,7 +796,6 @@ void* threadFunc(void* arg) {
                     if (debug) {
                         fprintf(stderr, "[ %d ] C: %s\n", conFD, command.c_str());
                     }
-
 
                     vector<string> parameters = splitKvstoreCommand(command);
                     bool receivedFromPrimary = false;

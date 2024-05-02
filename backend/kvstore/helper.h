@@ -17,7 +17,7 @@
 
 using namespace std;
 
-// Define the key-value store
+// Define the key-value store 
 unordered_map<string, unordered_map<string, string>> table;
 vector<int> openConnections;
 
@@ -157,6 +157,5 @@ void parseServers(const string& filename, ServerMap& servers) {
         info.udpPort2 = stoi(parts[4]);
 
         servers[info.replicaGroup].push_back(info);
-
     }
 }
