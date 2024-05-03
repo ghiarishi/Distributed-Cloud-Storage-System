@@ -22,6 +22,7 @@
 #include <ctime>
 
 using namespace std;
+
 ServerInfo masterInfo;
 ServerInfo primaryInfo;
 
@@ -39,7 +40,7 @@ struct thread_data {
     socklen_t clientaddrlen;
 };
 
-// signal handler
+// signal handler for ctrl c
 void sigHandler(int signum) {
     for (int conFD : openConnections) { // iterate through all currently open connections and shut them down
         string msg = "-ERR Server shutting down\r\n";
@@ -47,9 +48,9 @@ void sigHandler(int signum) {
             fprintf(stderr, "Failed to write: %s\n", strerror(errno));
             exit(1);
         }
-        if(debug){
-            fprintf(stderr, "[ %d ] S: %s\n", conFD, msg.c_str());
-        }
+
+        printDebug(msg);
+
         if (close(conFD) < 0){
             fprintf(stderr, "Failed to close connection: %s\n", strerror(errno));
             exit(1);
@@ -59,21 +60,22 @@ void sigHandler(int signum) {
     exit(1); 
 }
 
-vector<string> splitKvstoreCommand(const string& command_str) {
+// function to split the command received delimited by commas
+vector<string> splitKVStoreCommand(const string& command_str) {
     vector<string> parameters;
     string temp = command_str.substr(0, command_str.find(' ') + 1);
     transform(temp.begin(), temp.end(), temp.begin(), ::toupper); 
     parameters.push_back(temp);
     const string& command_parameters = command_str.substr(command_str.find(' ') + 1);
-    stringstream ss(command_parameters); // Create a stringstream from the command
+    stringstream ss(command_parameters); // create a stringstream from the command
     string parameter;
-    while (getline(ss, parameter, ',')) { // Read parameters separated by ','
-    parameters.push_back(parameter);
+    while (getline(ss, parameter, ',')) { // read parameters separated by ','
+        parameters.push_back(parameter);
     }
     return parameters;
 }
 
-// Function to split a string based a on delimiter
+// function to split a string based a on delimiter
 vector<string> split(const string& str, char delimiter) {
     vector<string> tokens;
     stringstream ss(str);
@@ -86,7 +88,7 @@ vector<string> split(const string& str, char delimiter) {
     return tokens;
 }
 
-// Append the write command with parameters at the end of the checkpoint log file (along with parameters - PUT, CPUT and DELETE)
+// append the write command with parameters at the end of the checkpoint log file (along with parameters - PUT, CPUT and DELETE)
 void handleAppend(string command) {
     if (command.size() > 0 && !currentlyReadingFromCheckpointFile) {
         appendToFile(diskFilePath + "-checkpoint", command);
@@ -111,9 +113,6 @@ long long sendStringOverSocket(int sock, const string& command) {
         }
 
         count += buffer.size();
-
-        // Slightly longer sleep to avoid overloading network for large sends
-        // usleep(10000);
     }
 
     return count;
@@ -125,64 +124,51 @@ string readFromSocket(int sock, int expectNumberOfBytesToRead) {
     string response;
 
     ssize_t bytesRead = 0;
-    if (debug)
-        printDebug("Reading from socket");
-    // Read data from the socket until no more data is available
+
+    printDebug("Reading from socket");
+
+    // read data from the socket until no more data is available
     while (bytesRead < expectNumberOfBytesToRead) {
         bytesRead += read(sock, buffer, bufferSize);
-        // Append the read data to the response string
-        if (debug)
-            printDebug("Bytes read from socket : " + to_string(bytesRead));
+        // append the read data to the response string
+        printDebug("Bytes read from socket : " + to_string(bytesRead));
         response.append(buffer, bytesRead);
     }
 
-    if (debug) {
-        printDebug("Response from socket : " + response);
-    }
+    printDebug("Response from socket: " + response);
+    
     return response;
 }
 
 string readAndWriteFromSocket(int sock, const string &command) {
     int expectNumberOfBytesToRead = EXPECTED_BYTES_TO_READ_WHEN_CONNECTING_TO_SERVER;
     string initialRead = readFromSocket(sock, expectNumberOfBytesToRead);
-    if (debug) {
-        printDebug("Read when making connection to server : " + initialRead);
+    
+    printDebug("Read when making connection to server: " + initialRead);
 
-    }
     long long count  = sendStringOverSocket(sock, command);
     
-    if (debug) {
-        printDebug("Sent " + to_string(count) + " bytes from primary to secondary");
-    }
+    printDebug("Sent " + to_string(count) + " bytes from primary to secondary.");
 
     // Expect to read only +OK from the server
     expectNumberOfBytesToRead = 5;
     string response = readFromSocket(sock,expectNumberOfBytesToRead);
 
     return response;
-
 }
 
 // Function to forward request to all secondary servers (only alive servers)
 bool forwardToAllSecondaryServers(string command) {
-
-    if (debug) {
-        printDebug("Forwarding command of size " + to_string(command.size()) + " to all secondary Servers ");
-    }
-
+    printDebug("Forwarding: " + command + " :to all secondary servers");
+    
     auto& serverList = servers[myInfo.replicaGroup]; 
-    if (debug) {
-        printDebug("ServerList.size for this replicaGroup + " + to_string(serverList.size()));
-    }
     
     for (auto it = serverList.begin(); it != serverList.end(); ++it) {
-        if (debug) {
-            printDebug("For port : " + to_string(it->tcpPort) + " is it Primary ? : " + to_string(it->isPrimary) + " is it dead ? : " + to_string(it->isDead));
-        }
+        printDebug("For port: " + to_string(it->tcpPort) + " is it Primary ? : " + to_string(it->isPrimary) + " is it dead ? : " + to_string(it->isDead));
+        
         if (it->isPrimary == false && it->isDead == false) {
-            if (debug) {
-                printDebug("Forwarding to -> " + it->ip + ":" + to_string(it->tcpPort));
-            }
+            printDebug("Forwarding to " + it->ip + ":" + to_string(it->tcpPort));
+            
             int sock = socket(AF_INET, SOCK_STREAM, 0);
             if (sock == -1) {
                 cerr << "Socket creation failed\n";
@@ -222,10 +208,9 @@ bool forwardToAllSecondaryServers(string command) {
             // Find the last instance of ",PRIMARY" in the command string
             size_t pos = command.rfind(",PRIMARY");
             if (pos != string::npos) {
-                // Extract the original command
                 string originalCommand = command.substr(0, pos);
 
-                // Append the original command to the dead server log file
+                // append the original command to the dead server log file
                 appendToFile(fileName, originalCommand);
             }
         }
@@ -233,7 +218,7 @@ bool forwardToAllSecondaryServers(string command) {
     return true;
 }
 
-// Function to forward initial request made to secondary to primary server
+// function to forward initial request made to secondary to primary server
 bool forwardToPrimary(string command) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
@@ -268,17 +253,16 @@ bool currentIsPrimary() {
 }
 
 void handleCommand(vector<string> parameters, string &msg, string command = "", bool receivedFromPrimary = false, bool receivedFromSecondary = false, bool receivedFromFrontend = true) {
-    // cout << "command -> " << command << endl;
-    // cout << " receieved from primary -> " << receivedFromPrimary << endl;
-    // cout << " receieved from frontend -> " << receivedFromFrontend << endl;
-    // cout << " receieved from secondary -> " << receivedFromSecondary << endl;
     
+    printDebug("Received from primary, secondary, frontend: " + to_string(receivedFromPrimary) + ", " + to_string(receivedFromSecondary) + ", " + to_string(receivedFromFrontend));
+
     if (parameters[0] == "PUT ") {
         if (parameters.size() >= 4 ) {
             if(currentlyInitializing) {
                 string row = parameters[1];
                 string col = parameters[2];
-                string value = parameters[3];  // Here, value is directly used as a string
+                string value = parameters[3]; 
+
                 table[row][col] = value;
                 msg = "+OK\r\n";
                 string appendCommand = parameters[0] + parameters[1] + "," + parameters[2] + "," + parameters[3];
@@ -293,11 +277,10 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
             */ 
             // First if block is for communication when primary forward to secondary
             if(currentIsPrimary()) {
-                cout << "Received command size -> " << command.size() << " in primary" << endl;
                 // Write to in-memory map , set msg as OK and do handleAppend(command) - setting msg as OK will send OK back to the sender
                 string tempCommand = parameters[0] + parameters[1] + "," + parameters[2] + "," + parameters[3] + ",PRIMARY\r\n";
                 if(forwardToAllSecondaryServers(tempCommand)) {
-                    cout << "Succeeded forwarding to all secondary and received +OK" << endl;
+                    printDebug("Succeeded forwarding to all secondary servers and received +OK.");
                     string row = parameters[1];
                     string col = parameters[2];
                     string value = parameters[3];  // Here, value is directly used as a string
@@ -318,7 +301,6 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                     msg = "+OK\r\n";
                 }
             } else if(!currentIsPrimary() && receivedFromPrimary) {
-                cout << "Received command size " << command.size() << " from primary +OK" << endl;
                 string row = parameters[1];
                 string col = parameters[2];
                 string value = parameters[3];  // Here, value is directly used as a string
@@ -367,11 +349,11 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
             */ 
             // First if block is for communication when primary forward to secondary
             if(currentIsPrimary()) {
-                cout << "Received command size -> " << command.size() << " in primary" << endl;
                 // Write to in-memory map , set msg as OK and do handleAppend(command) - setting msg as OK will send OK back to the sender
                 string tempCommand = parameters[0] + parameters[1] + "," + parameters[2] + "," + parameters[3] + ","+ parameters[4] + ",PRIMARY\r\n";
                 if(forwardToAllSecondaryServers(tempCommand)) {
-                    cout << "Succeeded forwarding to all secondary and received +OK" << endl;
+                    printDebug("Succeeded forwarding to all secondary servers and received +OK");
+
                     string row = parameters[1];
                     string col = parameters[2];
                     string currentValue = parameters[3];
@@ -396,7 +378,6 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                     msg = "+OK\r\n";
                 }
             } else if(!currentIsPrimary() && receivedFromPrimary) {
-                cout << "Received command size " << command.size() << " from primary +OK" << endl;
                 string row = parameters[1];
                 string col = parameters[2];
                 string currentValue = parameters[3];
@@ -425,11 +406,11 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 return;
             }
             if(currentIsPrimary()) {
-                cout << "Received command size -> " << command.size() << " in primary" << endl;
                 // Write to in-memory map , set msg as OK and do handleAppend(command) - setting msg as OK will send OK back to the sender
                 string tempCommand = parameters[0] + parameters[1] + "," + parameters[2] + ",PRIMARY\r\n";
                 if(forwardToAllSecondaryServers(tempCommand)) {
-                    cout << "Succeeded forwarding to all secondary and received +OK" << endl;
+                    printDebug("Succeeded forwarding to all secondary servers and received +OK");
+
                     string row = parameters[1];
                     string col = parameters[2];
                     table[row].erase(col);
@@ -449,7 +430,6 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                     msg = "+OK\r\n";
                 }
             } else if(!currentIsPrimary() && receivedFromPrimary) {
-                cout << "Received command size " << command.size() << " from primary +OK" << endl;
                 string row = parameters[1];
                 string col = parameters[2];
                 table[row].erase(col);
@@ -476,7 +456,6 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
     } else {
         msg = "-ERR Unknown command\r\n";
     }
-    // cout << "Mesage sending from handleCommand -> " << msg << endl;
 }
 
 bool crashRecoveryFunction(string path) {
@@ -494,7 +473,7 @@ bool crashRecoveryFunction(string path) {
         string line;
         string msg;
         while (getline(crashFilePath, line)) {
-            vector<string> parameters = splitKvstoreCommand(line);
+            vector<string> parameters = splitKVStoreCommand(line);
             handleCommand(parameters, msg);
         }
         crashFilePath.close();
@@ -507,11 +486,12 @@ bool crashRecoveryFunction(string path) {
     cout << "Crash recovery (true) from " << path << "-deadServerLog" << endl;
     return false;
 }
-// Function to initialize in-memory map - which reads diskfile and replays the checkpointing file
-// TODO : Contact primary server and see if it is out of sync with them and update accordingly
+
+// function to initialize in-memory map - which reads diskfile and replays the checkpointing file
+// contact primary server and see if it is out of sync with them and update accordingly
 void initialize(string path) {
 
-    // Create the file if it doesn't exist and open it for appending
+    // create the file if it doesn't exist, open it for appending
     fstream file(path, ios::out | ios::app);
 
     if (!file.is_open()) {
@@ -534,9 +514,9 @@ void initialize(string path) {
                 // TODO : <How to handle invalid file writes>
             }
         }
-        if (debug) {
-            printDebug("Disk file -> " + path + " loaded in-memory ");
-        }
+
+        printDebug("Disk file -> " + path + " loaded in memory.");
+        
         dataFile.close();
     } else {
         cerr << "Error opening data file" << endl;
@@ -562,7 +542,7 @@ void initialize(string path) {
         currentlyReadingFromCheckpointFile = true;
         while (getline(logFile, line)) {
             currentNumberOfWritesForReplicaAndServer++;
-            vector<string> parameters = splitKvstoreCommand(line);
+            vector<string> parameters = splitKVStoreCommand(line);
             handleCommand(parameters, msg);
         }
         currentlyReadingFromCheckpointFile = false;
@@ -571,25 +551,21 @@ void initialize(string path) {
         cerr << "Error opening checkpoint log file" << endl;
     }
 
+
+    // SIMPLIFY THIS
     if (currentNumberOfWritesForReplicaAndServer >= CHECKPOINTING_THRESHOLD) {
         checkpoint_table(path);
         currentNumberOfWritesForReplicaAndServer = 0;
-        if (debug) {
-            printDebug("Checkpointing done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
-        }
+        printDebug("Checkpointing done! currentNumberOfWrites = " + to_string(currentNumberOfWritesForReplicaAndServer));
     }
 
     // Should we perform crash recovery ?
     if (crashRecoveryFunction(path)) {
-        if(debug) {
-            printDebug("Crash Recovery Done");
-        }
+        printDebug("Crash Recovery Done!");
         if (currentNumberOfWritesForReplicaAndServer >= CHECKPOINTING_THRESHOLD) {
             checkpoint_table(path);
             currentNumberOfWritesForReplicaAndServer = 0;
-            if (debug) {
-                printDebug("Check done and now currentNumberOfWrites is -> " + to_string(currentNumberOfWritesForReplicaAndServer));
-            }
+            printDebug("Checkpointing done! currentNumberOfWrites = " + to_string(currentNumberOfWritesForReplicaAndServer));
         }
     }
 }
@@ -625,11 +601,13 @@ void receiveStatus() {
         if (n > 0) {
             buffer[n] = '\0';
             string message(buffer);
-            cout << "Status message received: " << buffer << endl;
+
+            printDebug("Status message received: " + message);
 
             size_t posColon = message.find(":");
             if (message.substr(0, posColon) == "PRIMARY"){ // primary
-                cout<<"Set to Primary in replica group " << to_string(replicaGroup)<<endl;
+                printDebug("Set to Primary in replica group " + to_string(replicaGroup));
+                
                 myInfo.isPrimary = true;
                 myInfo.isDead = false;  
 
@@ -650,7 +628,7 @@ void receiveStatus() {
 
                     int tcpTemp = stoi(ip_port.substr(ip_port.find(":") + 1));
 
-                    cout<<"Primary marks secondary alive in group " << to_string(replicaGroup)<<endl;
+                    printDebug("Primary marks secondary alive in group " + to_string(replicaGroup));
 
                     auto& serverList = servers[myInfo.replicaGroup]; 
                     for (auto it = serverList.begin(); it != serverList.end(); ++it) {
@@ -668,7 +646,7 @@ void receiveStatus() {
                 string ipTemp = ip_port.substr(0, ip_port.find(":"));
                 int tcpTemp = stoi(ip_port.substr(ip_port.find(":") + 1));
 
-                cout<<"Set to Secondary in replica group " << to_string(replicaGroup)<<endl;
+                printDebug("Set to Secondary in replica group " + to_string(replicaGroup));
 
                 myInfo.isPrimary = false;
                 myInfo.isDead = false;  
@@ -686,21 +664,20 @@ void receiveStatus() {
                 }
             }
 
-    
-
             // SERVER IS DEAD
             size_t posSemi = message.find(";");
             if (posSemi != string::npos) {
                 string ipAndTCP = message.substr(posSemi + 1);
                 string tempIp = ipAndTCP.substr(0, ipAndTCP.find(":"));
                 int deadTCP = stoi(ipAndTCP.substr(ipAndTCP.find(":")+1));
-                cout << "Dead TCP -> " << deadTCP << endl;
+                printDebug("Server " + ipAndTCP + " is dead");
+              
                 auto& serverList = servers[replicaGroup]; // Reference to the vector of servers in the specified group
                 for (auto it = serverList.begin(); it != serverList.end(); ++it) {
                     if (it->ip == tempIp && it->tcpPort == deadTCP){
                         it->isDead = true;
                         it->isPrimary = false;
-                        cout << "Server marked as dead" << endl;
+                        printDebug("Server " + ipAndTCP + " marked dead");
                     } 
                 }
             }
@@ -729,8 +706,7 @@ void sendHeartbeat() {
     heartbeat_message.push_back('\0');
 
     while (true) {
-        int send_status = sendto(sockfd, heartbeat_message.c_str(), heartbeat_message.size(),
-                                 0, (const struct sockaddr*)&servaddr, sizeof(servaddr));
+        int send_status = sendto(sockfd, heartbeat_message.c_str(), heartbeat_message.size(), 0, (const struct sockaddr*)&servaddr, sizeof(servaddr));
         if (send_status < 0) {
             cerr << "Error sending heartbeat" << endl;
         }
@@ -745,28 +721,6 @@ void sendHeartbeat() {
     close(sockfd);
 }
 
-bool checkReceivedFromPrimary(struct sockaddr_in clientaddr, socklen_t clientaddrlen) {
-    cout << "primaryInfo -> " << primaryInfo.ip << ":" << primaryInfo.tcpPort << endl; // Directly print in host byte order
-    cout << "Sent From -> " << inet_ntoa(clientaddr.sin_addr) << ":" << ntohs(clientaddr.sin_port) << endl; // Convert network to host byte order for printing
-    bool x = (primaryInfo.ip == inet_ntoa(clientaddr.sin_addr)) && (htons(primaryInfo.tcpPort) == clientaddr.sin_port);
-    cout << (x ? "true" : "false") << endl;
-    return x;
-}
-
-bool checkReceivedFromSecondary(struct sockaddr_in clientaddr, socklen_t clientaddrlen) {
-    // Reference to the vector of servers in the specified group
-    auto& serverList = servers[myInfo.replicaGroup]; 
-    
-    for (auto it = serverList.begin(); it != serverList.end(); ++it) {
-        if (it->isPrimary == false) {
-            if((it->ip == inet_ntoa(clientaddr.sin_addr)) && (it->tcpPort == ntohs(clientaddr.sin_port))){
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 void* threadFunc(void* arg) {
     struct thread_data* data = (struct thread_data*)arg;
 
@@ -779,7 +733,7 @@ void* threadFunc(void* arg) {
     while (true) {
         bytesRead = read(conFD, buffer, BUFFER_SIZE);
         if (bytesRead < 0) {
-            cout << "Command at failure is -> " << command << endl;
+            printDebug("Command at failure: " + command);
             fprintf(stderr, "Failed to read: %s\n", strerror(errno));
             exit(1);
         } else if (bytesRead == 0) {
@@ -792,29 +746,23 @@ void* threadFunc(void* arg) {
             if (ch == '\r') {
                 // Assuming next char is '\n', check boundary
                 if (i + 1 < bytesRead && buffer[i + 1] == '\n') {
-                    // cout << "COMMAND COMPLETE!!!" << endl;
-                    if (debug) {
-                        fprintf(stderr, "[ %d ] C: %s\n", conFD, command.c_str());
-                    }
+                    printDebug("Command received: " + command);
 
-                    vector<string> parameters = splitKvstoreCommand(command);
+                    vector<string> parameters = splitKVStoreCommand(command);
+
                     bool receivedFromPrimary = false;
                     bool receivedFromSecondary = false;
                     bool receivedFromFrontend = false;
-                    cout << "Command receieved size is -> " << command.size() << endl;
+
                     if (parameters.size() >= 4 && (parameters[0] == "PUT " || parameters[0] == "CPUT " || parameters[0] == "DELETE ")) {
                         if (parameters[parameters.size()-1] == "PRIMARY") {
                             receivedFromPrimary = true;
-                            cout << "Received from PRIMARY is TRUE" <<endl;
                         } else if (parameters[parameters.size()-1] == "SECONDARY") {
-                            cout << "Received from SECONDARY is TRUE"  << endl;
                             receivedFromSecondary = true;
                         } else {
-                            cout << "Received from Frontend is TRUE" << endl;
                             receivedFromFrontend = true;
                         }
                     } else {
-                        cout << "Received from Frontend is TRUE" << endl;
                         receivedFromFrontend = true;
                     }
                     handleCommand(parameters, msg, command, receivedFromPrimary, receivedFromSecondary, receivedFromFrontend);
@@ -825,23 +773,22 @@ void* threadFunc(void* arg) {
                         currentNumberOfWritesForReplicaAndServer = 0;
                     }
 
-
-                    cout << "Sending message back -> " <<  msg << endl;
                     if (write(conFD, msg.c_str(), msg.length()) < 0) {
                         fprintf(stderr, "Failed to write: %s\n", strerror(errno));
                         exit(1);
                     }
 
-                    if (debug) {
-                        fprintf(stderr, "[ %d ] S: %s\n", conFD, msg.c_str());
-                    }
+                    printDebug("[threadFunc] Final response message: " + msg);
 
                     // reset for the next command
                     command.clear();
-                    i++; // Skip '\n' as it's already processed
+
+                    // skip \n as it's already processed
+                    i++; 
                 } else {
-                    // Handle cases where '\n' might come in the next batch
-                    command += '\r'; // Keep '\r' in command as we're unsure about '\n'
+                    // handle cases where \n might come in the next batch
+                    // keep \r in command as we're unsure about \n
+                    command += '\r'; 
                 }
             } else {
                 command += ch;
@@ -854,16 +801,13 @@ void* threadFunc(void* arg) {
         exit(1);
     }
 
-    if (debug) {
-        fprintf(stderr, "[ %d ] Connection closed \n", conFD);
-    }
+    printDebug("Connection closed.");
 
     // Remove the socket from the open connections vector
     auto it = find(openConnections.begin(), openConnections.end(), conFD);
     if (it != openConnections.end()) {
         openConnections.erase(it);
     }
-
     return NULL;
 }
 
@@ -894,7 +838,6 @@ int main(int argc, char *argv[]){
             if (myInfo.tcpPort == info.tcpPort){ 
                 myInfo = info;
             }
-            // cout << "  IP: " << info.ip << ", TCP Port: " << info.tcpPort << ", UDP Port: " << info.udpPort << endl;
         }
     }
 
@@ -955,19 +898,15 @@ int main(int argc, char *argv[]){
         data->clientaddr = clientaddr;
         data->clientaddrlen = clientaddrlen;
 
-        if(debug){
-            fprintf(stderr, "[ %d ] New connection\n", data->conFD);
-        }
+        printDebug("New connection established: " + data->conFD);
 
-        string greeting = "+OK Server ready (Author: Rishi Ghia / ghiar) \r\n";
+        string greeting = "+OK Server ready (Authors: Janavi, Pranshu, Rishi, Zihao) \r\n";
         if (write(data->conFD, greeting.c_str(), greeting.length()) < 0){
             fprintf(stderr, "Failed to write: %s\n", strerror(errno));
             exit(1);
         }
         
-        if(debug){
-            fprintf(stderr, "[ %d ] +OK Server ready (Author: Rishi Ghia / ghiar) \n", data->conFD);
-        }
+        printDebug("Greeting message sent.");
         
         openConnections.push_back(data->conFD); // add the FD to open connections
 
