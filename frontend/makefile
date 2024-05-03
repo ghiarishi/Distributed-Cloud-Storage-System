@@ -1,19 +1,29 @@
 # Compiler
-CC = g++
+#CC = g++
 
 # Compiler flags
-CFLAGS = -std=c++11 -pthread
+#CFLAGS = -std=c++11 -pthread
 
 # Executable name
-TARGET = frontendserver
+#TARGET = frontendserver
 
 # Source files
-SRCS = frontendserver.cc
+#SRCS = frontendserver.cc
 
 # Rule to build the executable
-$(TARGET): $(SRCS)
-	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET)
+#$(TARGET): $(SRCS)
+#	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET)
 
 # Clean rule
-clean:
-	rm -f $(TARGET)
+#clean:
+#	rm -f $(TARGET)
+
+TARGETS = frontendserver
+
+all: $(TARGETS)
+
+frontendserver: frontendserver.cc
+	g++ $^ -lpthread -g -o $@
+
+clean::
+	rm -fv $(TARGETS) *~
