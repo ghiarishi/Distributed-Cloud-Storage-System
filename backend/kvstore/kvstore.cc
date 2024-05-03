@@ -299,6 +299,9 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 // First forward to all secondaries, wait for OK response from all of them, then write to in-memory and call handleAppend and assign to msg
                 if(forwardToPrimary(tempCommand)) {
                     msg = "+OK\r\n";
+                } else {
+                    printDebug("Primary returned False while performing this PUT");
+                    msg = "-ERR Returned by Server while writing PUT Values\r\n";
                 }
             } else if(!currentIsPrimary() && receivedFromPrimary) {
                 string row = parameters[1];
@@ -376,6 +379,9 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 // First forward to all secondaries, wait for OK response from all of them, then write to in-memory and call handleAppend and assign to msg
                 if(forwardToPrimary(tempCommand)) {
                     msg = "+OK\r\n";
+                } else {
+                    printDebug("Error writing CPUT Values when forwarded to Primary");
+                    msg = "-ERR Error Editing the values\r\n";
                 }
             } else if(!currentIsPrimary() && receivedFromPrimary) {
                 string row = parameters[1];
@@ -428,6 +434,9 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 // First forward to all secondaries, wait for OK response from all of them, then write to in-memory and call handleAppend and assign to msg
                 if(forwardToPrimary(tempCommand)) {
                     msg = "+OK\r\n";
+                } else {
+                    printDebug("Error Deleting Values when command was forwarded to Primary");
+                    msg = "-ERR Error Deleting Values\r\n";
                 }
             } else if(!currentIsPrimary() && receivedFromPrimary) {
                 string row = parameters[1];
