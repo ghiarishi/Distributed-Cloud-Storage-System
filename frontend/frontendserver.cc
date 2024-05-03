@@ -14,6 +14,7 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 using namespace std;
 
@@ -353,7 +354,6 @@ void send_file(int client_socket, const string &file_path)
     auto file_size = file.tellg();
     file.seekg(0, ios::beg);
 
-    string mime_type = get_mime_type(file_path);
     stringstream header;
     header << "HTTP/1.1 200 OK\r\n";
     header << "Content-Type: application/octet-stream\r\n";
@@ -1066,20 +1066,23 @@ void *thread_worker(void *fd)
 					content[contentlen] = '\0';
 
                     // process the message body
-                    if (DEBUG)
-                    {
-                        // fprintf(stderr, "[%d] C: %s\n", sock, content);
-                        // fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
-                        fprintf(stderr, "[%d] C: ", sock);
-                        for (int c = 0; c < contentlen; c++)
-                        {
-                            char c_tmp[1];
-                            strncpy(c_tmp, content + c, 1);
-                            c_tmp[1] = '\0';
-                            fprintf(stderr, "%s", c_tmp);
-                        }
-                        fprintf(stderr, "\n");
-                    }
+					if (DEBUG) {
+						//fprintf(stderr, "[%d] C: %s\n", sock, content);
+						//fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
+						for (int c = 0; c < contentlen; c++) {
+							char c_tmp[1];
+							strncpy(c_tmp, content+c, 1);
+							c_tmp[1] = '\0';
+							fprintf(stderr, "%s", c_tmp);
+
+							// break for message body that's too long
+							if (c >= 2048) {
+								fprintf(stderr, "\n..............\n");
+								break;
+							}
+						}
+						fprintf(stderr, "\n");
+					}
 
                     // request to get menu webpage
                     if (reply_code == MENU)
