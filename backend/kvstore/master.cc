@@ -73,7 +73,12 @@ void handleIncomingRequests() {
                 if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
                     printDebug("[handleIncomingRequests] Command received from frontend: " + command);
 
-                    if (command.substr(0,11) == "GET_SERVER:") {
+                    string temp = command;
+                    for (char &c : temp) {
+                        c = toupper(c);
+                    }
+
+                    if (temp.substr(0,11) == "GET_SERVER:") {
                         string username = command.substr(11);
                         
                         int replicaGroup;

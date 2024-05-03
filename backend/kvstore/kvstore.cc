@@ -26,6 +26,7 @@ using namespace std;
 ServerInfo masterInfo;
 ServerInfo primaryInfo;
 
+bool enabled = true; // enabled by default, disabled by signal from admin console
 bool currentlyInitializing = false;
 bool currentlyReadingFromCheckpointFile = false;
 
@@ -600,6 +601,9 @@ void receiveStatus() {
 
     
     while(true){
+        if (!enabled) { 
+            continue;
+        }
 
         char buffer[BUFFER_SIZE];
         socklen_t len;
@@ -698,6 +702,103 @@ void receiveStatus() {
     close(sockfd);
 }
 
+void adminConsoleSignalHandler() {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket: " << strerror(errno) << endl;
+        return;
+    }
+
+    // ensure socket closes, and new socket can be opened
+    int option = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR|SO_REUSEPORT, &option, sizeof(option)) < 0){
+        fprintf(stderr, "Failed to setsockopt: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+    servaddr.sin_port = htons(myInfo.tcpPort2);
+
+    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        cerr << "Bind failed: " << strerror(errno) << endl;
+        close(sockfd);
+        return;
+    }
+
+    listen(sockfd, 5);
+
+    while (true) {  // main accept() loop
+        int conFD = accept(sockfd, NULL, NULL);
+        if (conFD < 0) {
+            cerr << "Error on accept: " << strerror(errno) << endl;
+            continue;
+        }
+
+        char buffer[BUFFER_SIZE];
+        string command;
+        int bytesRead;
+
+        bytesRead = read(conFD, buffer, sizeof(buffer));
+        if (bytesRead < 0) {
+            cerr << "Failed to read: " << strerror(errno) << endl;
+        } else if (bytesRead == 0) {
+            // connection closed by client
+            printDebug("Connection closed by admin");
+        } else {
+            for (int i = 0; i < bytesRead; ++i) {
+                char ch = buffer[i];
+                    
+                // command is complete
+                if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
+                    printDebug("[adminConsoleSignalHandler] Command received from admin: " + command);
+                    
+                    string temp = command;
+                    for (char &c : temp) {
+                        c = std::toupper(c);
+                    }
+
+                    string response;
+
+                    if (temp == "ENABLE" && !enabled) {
+                        enabled = true; // set flag to true
+
+                        // perform crash recovery
+                        currentlyInitializing = true;
+                        initialize(diskFilePath);
+                        currentlyInitializing = false;
+                        
+                        response = "+OK\r\n";
+
+                    } else if (temp == "DISABLE" && enabled) {
+                        enabled = false; // set flag to disabled
+                        response = "+OK\r\n";
+                    } else {
+                        response = "-ERR Invalid Command\r\n";
+                    }
+
+                    printDebug("[adminConsoleSignalHandler] Replied to admin console: " + response);
+
+                    // send the response to the admin console
+                    write(conFD, response.c_str(), response.length());
+
+                    command.clear();
+                    
+                    // skip \n
+                    i++;
+                } else {
+                    command += ch;
+                }
+            }
+        }
+        // close the connection to the frontend server
+        close(conFD);  
+    }
+    close(sockfd);
+}
+
 void sendHeartbeat() {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -715,6 +816,9 @@ void sendHeartbeat() {
     heartbeat_message.push_back('\0');
 
     while (true) {
+        if (!enabled) {
+            continue;
+        }
         int send_status = sendto(sockfd, heartbeat_message.c_str(), heartbeat_message.size(), 0, (const struct sockaddr*)&servaddr, sizeof(servaddr));
         if (send_status < 0) {
             cerr << "Error sending heartbeat" << endl;
@@ -740,6 +844,11 @@ void* threadFunc(void* arg) {
     int bytesRead;
 
     while (true) {
+        
+        if (!enabled) {
+            continue;
+        }
+
         bytesRead = read(conFD, buffer, BUFFER_SIZE);
         if (bytesRead < 0) {
             printDebug("Command at failure: " + command);
@@ -820,7 +929,6 @@ void* threadFunc(void* arg) {
     return NULL;
 }
 
-
 int main(int argc, char *argv[]){
     signal(SIGINT, sigHandler);
     parseArguments(argc, argv);
@@ -853,10 +961,12 @@ int main(int argc, char *argv[]){
     // create a separate thread to send heartbeat to master node
     thread heartbeat_thread(sendHeartbeat);
     heartbeat_thread.detach();
-    //receive status message (pri/secondary)
+    // receive status message (pri/secondary)
     thread status_thread(receiveStatus);
     status_thread.detach();
-
+    // receive enable/disable signals from frontend
+    thread adminConsoleThread(adminConsoleSignalHandler);
+    adminConsoleThread.detach();
 
     // create new socket
     int listenFD = socket(PF_INET, SOCK_STREAM, 0);
