@@ -15,6 +15,10 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <chrono> 
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
 
 using namespace std;
 
@@ -80,14 +84,51 @@ int UPLOAD = 13;
 
 int ADMIN = 14;
 
-
 /////////////////////////////////////
 //                                 //
 //        Extract Methods                //
 //                                 //
 /////////////////////////////////////
 
-vector<email> extractEmails(string username , string returnString)
+// Get filename from the path
+string getFileName(const string &path)
+{
+    size_t pos = path.find_last_of("/\\");
+    if (pos != std::string::npos)
+        return path.substr(pos + 1);
+    return path;
+}
+
+vector<pair<string, int>> extractFiles(string username, string returnString)
+{
+    vector<string> paths;
+    istringstream iss(returnString);
+    string line;
+    vector<pair<string, int>> files;
+
+    while (std::getline(iss, line))
+    {
+        // Assuming "/content/" is fixed part of the path
+        size_t startPos = line.find("/content/");
+        if (startPos != std::string::npos)
+        {
+            // Extract path starting from "/content/"
+            std::string path = line.substr(startPos);
+            paths.push_back(path);
+        }
+    }
+
+    for (string currPath : paths)
+    {
+        string fileName = getFileName(currPath);
+        int isFile = (currPath.find('.') != std::string::npos);
+        pair<string, int> filePair = make_pair(fileName, isFile);
+        files.push_back(filePair);
+    }
+    return files;
+}
+
+vector<email> extractEmails(string username, string returnString)
 {
     vector<email> emails;
     istringstream iss(returnString);
@@ -152,6 +193,30 @@ pair<string, int> extractIPAndPort(const string &serverInfo)
 //                                 //
 /////////////////////////////////////
 
+string base64Encode(const std::vector<char>& data) {
+    // Create a BIO object for base64 encoding
+    BIO* bio = BIO_new(BIO_s_mem());
+    BIO* base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Write data to BIO
+    BIO_write(bio, data.data(), data.size());
+    BIO_flush(bio);
+
+    // Get the encoded data
+    BUF_MEM* bio_buf;
+    BIO_get_mem_ptr(bio, &bio_buf);
+
+    // Convert the encoded data to a std::string
+    std::string encoded_data(bio_buf->data, bio_buf->length);
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return encoded_data;
+}
+
 // get backendNodes from the fileName
 vector<Node> getBackendNodes(string filename)
 {
@@ -191,15 +256,6 @@ vector<Node> getBackendNodes(string filename)
 
     file.close();
     return nodes;
-}
-
-// Get filename from the path
-string getFileName(const string &path)
-{
-    size_t pos = path.find_last_of("/\\");
-    if (pos != std::string::npos)
-        return path.substr(pos + 1);
-    return path;
 }
 
 // Parse login data
@@ -264,15 +320,20 @@ map<string, string> parseQuery(const string &query)
 }
 
 // Helper function to split binary data by delimiter
-std::vector<std::vector<char>> split(const std::vector<char>& s, const std::string& delimiter) {
+std::vector<std::vector<char>> split(const std::vector<char> &s, const std::string &delimiter)
+{
     std::vector<std::vector<char>> parts;
     auto it = s.begin();
-    while (it != s.end()) {
+    while (it != s.end())
+    {
         auto pos = std::search(it, s.end(), delimiter.begin(), delimiter.end());
-        if (pos != s.end()) {
+        if (pos != s.end())
+        {
             parts.emplace_back(it, pos);
             it = pos + delimiter.size();
-        } else {
+        }
+        else
+        {
             parts.emplace_back(it, s.end());
             break;
         }
@@ -281,19 +342,23 @@ std::vector<std::vector<char>> split(const std::vector<char>& s, const std::stri
 }
 
 // Extracts the boundary from the Content-Type header
-std::string extract_boundary(const std::string& contentType) {
+std::string extract_boundary(const std::string &contentType)
+{
     size_t pos = contentType.find("boundary=");
-    if (pos == std::string::npos) return "";
+    if (pos == std::string::npos)
+        return "";
     std::string boundary = contentType.substr(pos + 9);
-    if (boundary.front() == '"') {
-        boundary.erase(0, 1); // Remove the first quote
+    if (boundary.front() == '"')
+    {
+        boundary.erase(0, 1);                // Remove the first quote
         boundary.erase(boundary.size() - 1); // Remove the last quote
     }
     return boundary;
 }
 
 // Parses the multipart/form-data content and returns file content and filename
-std::pair<std::vector<char>, std::string> parse_multipart_form_data(const string& contentType, const vector<char>& body) {
+std::pair<std::vector<char>, std::string> parse_multipart_form_data(const string &contentType, const vector<char> &body)
+{
     std::string boundary = extract_boundary(contentType);
     std::string delimiter = "--" + boundary + "\r\n";
     std::string endDelimiter = "--" + boundary + "--";
@@ -302,20 +367,24 @@ std::pair<std::vector<char>, std::string> parse_multipart_form_data(const string
 
     std::vector<std::vector<char>> parts = split(body, delimiter);
 
-    for (const auto& part : parts) {
-        if (part.empty() || std::equal(part.begin(), part.end(), endDelimiter.begin(), endDelimiter.end())) {
+    for (const auto &part : parts)
+    {
+        if (part.empty() || std::equal(part.begin(), part.end(), endDelimiter.begin(), endDelimiter.end()))
+        {
             continue;
         }
 
         auto headerEndPos = std::search(part.begin(), part.end(), std::begin("\r\n\r\n"), std::end("\r\n\r\n") - 1);
-        if (headerEndPos == part.end()) {
+        if (headerEndPos == part.end())
+        {
             continue; // Skip if there's no header
         }
 
         std::string headers(part.begin(), headerEndPos);
         std::vector<char> content(headerEndPos + 4, part.end() - 2); // Remove last \r\n
 
-        if (headers.find("filename=") != std::string::npos) {
+        if (headers.find("filename=") != std::string::npos)
+        {
             size_t namePos = headers.find("name=\"");
             size_t nameEndPos = headers.find("\"", namePos + 6);
             std::string fieldName = headers.substr(namePos + 6, nameEndPos - (namePos + 6));
@@ -331,7 +400,6 @@ std::pair<std::vector<char>, std::string> parse_multipart_form_data(const string
 
     return {fileContent, filename};
 }
-
 
 void send_chunk(int client_socket, const vector<char> &data)
 {
@@ -360,7 +428,6 @@ void send_file(int client_socket, const string &file_path)
 
     string file_name = getFileName(file_path);
 
-
     header << "Content-Length: " << file_size << "\r\n";
     header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
     header << "\r\n";
@@ -385,7 +452,8 @@ void send_file(int client_socket, const string &file_path)
 }
 
 // send file data to the client. file_path is the path in the backend (used for getting filename).
-void send_file_data(int client_socket, string file_path, int file_size, char *data) {
+void send_file_data(int client_socket, string file_path, int file_size, char *data)
+{
 
     stringstream header;
     header << "HTTP/1.1 200 OK\r\n";
@@ -393,23 +461,23 @@ void send_file_data(int client_socket, string file_path, int file_size, char *da
 
     string file_name = getFileName(file_path);
 
-	header << "Content-Length: " << file_size << "\r\n";
-	header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
-	header << "\r\n";
+    header << "Content-Length: " << file_size << "\r\n";
+    header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
+    header << "\r\n";
 
-	send(client_socket, header.str().c_str(), header.str().size(), 0);
-	if (DEBUG) {
-		fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
-	}
-
-	char buffer[FBUFFER_SIZE];
-	send(client_socket, data, file_size, 0);
-	if (DEBUG) {
-		fprintf(stderr, "[%d] S: file sent for downloading\n", client_socket);
+    send(client_socket, header.str().c_str(), header.str().size(), 0);
+    if (DEBUG)
+    {
+        fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
     }
 
+    char buffer[FBUFFER_SIZE];
+    send(client_socket, data, file_size, 0);
+    if (DEBUG)
+    {
+        fprintf(stderr, "[%d] S: file sent for downloading\n", client_socket);
+    }
 }
-
 
 string generate_cookie()
 {
@@ -572,12 +640,13 @@ vector<email> get_mailbox(string username, int currentClientNumber)
     string response = readFromBackendSocket(backend_socks[currentClientNumber].socket);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-    vector<email> emails = extractEmails(username , response);
-    
+    vector<email> emails = extractEmails(username, response);
+
     return emails;
 }
 
-string getEmailContent( string emailID , int currentClientNumber){
+string getEmailContent(string emailID, int currentClientNumber)
+{
     string command = "GET " + emailID + "\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
     sendToBackendSocket(backend_socks[currentClientNumber].socket, command);
@@ -588,12 +657,12 @@ string getEmailContent( string emailID , int currentClientNumber){
     return response;
 }
 // retrieve files/folders in drive (0 for file, 1 for folder)
-vector<pair<string, int>> get_drive(string username, int currentClientNumber , string dir_path)
+vector<pair<string, int>> get_drive(string username, int currentClientNumber, string dir_path)
 {
-    pair<string, int> f1 = make_pair("document_1.txt", 0);
-    pair<string, int> f2 = make_pair("image_1.png", 0);
-    pair<string, int> d1 = make_pair("folder_1", 1);
-    vector<pair<string, int>> files = {f1, f2, d1};
+    // pair<string, int> f1 = make_pair("document_1.txt", 0);
+    // pair<string, int> f2 = make_pair("image_1.png", 0);
+    // pair<string, int> d1 = make_pair("folder_1", 1);
+    // vector<pair<string, int>> files = {f1, f2, d1};
 
     string command = "LIST " + username + ",/content\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
@@ -602,8 +671,15 @@ vector<pair<string, int>> get_drive(string username, int currentClientNumber , s
     string response = readFromBackendSocket(backend_socks[currentClientNumber].socket);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-    vector<email> emails = extractEmails(username , response);
-    
+    vector<pair<string, int>> files = extractFiles(username, response);
+
+    DEBUG ? printf("The files we have are  \n") : 0;
+    for (const auto &pair : files)
+    {
+        std::cout << "(" << pair.first << ", " << pair.second << ")" << std::endl;
+    }
+    DEBUG ? printf("\n") : 0;
+
     return files;
 }
 
@@ -699,10 +775,10 @@ string renderMenuPage(string username)
 
 // render the drive webpage
 // TODO: render files retrieved from backend
-string renderDrivePage(string username,  int currentClientNumber , string dir_path = "" )
+string renderDrivePage(string username, int currentClientNumber, string dir_path = "")
 {
 
-    vector<pair<string, int>> files = get_drive(username, currentClientNumber , dir_path);
+    vector<pair<string, int>> files = get_drive(username, currentClientNumber, dir_path);
 
     string content = "";
     content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
@@ -819,9 +895,9 @@ string renderMailboxPage(string username, int currentClientNumber)
 }
 
 // render the email content page for an email (item)
-string renderEmailPage(string username, string item , int currentClientNumber)
+string renderEmailPage(string username, string item, int currentClientNumber)
 {
-    string content = getEmailContent(item , currentClientNumber);
+    string content = getEmailContent(item, currentClientNumber);
     if (item == "send")
     {
         content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
@@ -918,7 +994,7 @@ string generateReply(int reply_code, string username = "", string item = "", str
     }
     else if (reply_code == DRIVE)
     {
-        return renderDrivePage(username, currentClientNumber , item);
+        return renderDrivePage(username, currentClientNumber, item);
     }
     else if (reply_code == MAILBOX)
     {
@@ -926,7 +1002,7 @@ string generateReply(int reply_code, string username = "", string item = "", str
     }
     else if (reply_code == EMAIL)
     {
-        return renderEmailPage(username, item , currentClientNumber);
+        return renderEmailPage(username, item, currentClientNumber);
     }
     else if (reply_code == SENDEMAIL)
     {
@@ -938,27 +1014,27 @@ string generateReply(int reply_code, string username = "", string item = "", str
     }
     else if (reply_code == DOWNLOAD)
     {
-        return renderDrivePage(username, currentClientNumber , item );
+        return renderDrivePage(username, currentClientNumber, item);
     }
     else if (reply_code == RENAME)
     {
-        return renderDrivePage(username, currentClientNumber , item );
+        return renderDrivePage(username, currentClientNumber, item);
     }
     else if (reply_code == MOVE)
     {
-        return renderDrivePage(username, currentClientNumber , item );
+        return renderDrivePage(username, currentClientNumber, item);
     }
     else if (reply_code == DELETE)
     {
-        return renderDrivePage(username, currentClientNumber , item );
+        return renderDrivePage(username, currentClientNumber, item);
     }
     else if (reply_code == NEWDIR)
     {
-        return renderDrivePage(username, currentClientNumber , item );
+        return renderDrivePage(username, currentClientNumber, item);
     }
     else if (reply_code == UPLOAD)
     {
-        return renderDrivePage(username, currentClientNumber , item );
+        return renderDrivePage(username, currentClientNumber, item);
     }
     else if (reply_code == ADMIN)
     {
@@ -1000,6 +1076,7 @@ void signal_handler(int sig)
 // thread function for communication with clients
 void *thread_worker(void *fd)
 {
+    printf("entered thread_worker\n");
     int sock = *(int *)fd;
 
     // This is the current client's number
@@ -1013,7 +1090,8 @@ void *thread_worker(void *fd)
     }
 
     char buffer[READ_SIZE];
-    char *dataBuffer;
+    char *dataBuffer = (char *)malloc(1); // Allocate memory for at least 1 character
+    dataBuffer[0] = '\0';                 // Null-terminate the string
     char *contentBuffer;
     size_t dataBufferSize = 0;
     // size_t content_read = 0;
@@ -1024,6 +1102,8 @@ void *thread_worker(void *fd)
     string contentType = "";
 
     string sid = generate_cookie();
+    printf("generated cookie\n");
+
     string tmp_sid = "";
 
     int reply_code = NOTFOUND;
@@ -1042,7 +1122,7 @@ void *thread_worker(void *fd)
         // There are some data read
         if (bytes_read > 0)
         {
-            // Add the data to the data buffer
+
             dataBuffer = (char *)realloc(dataBuffer, dataBufferSize + bytes_read + 1);
             memcpy(dataBuffer + dataBufferSize, buffer, bytes_read);
             dataBufferSize += bytes_read;
@@ -1061,28 +1141,31 @@ void *thread_worker(void *fd)
                 }
                 else
                 {
-                    char *content = (char *)malloc((contentlen+1) * sizeof(char));
-					memcpy(content, dataBuffer, contentlen);
-					content[contentlen] = '\0';
+                    char *content = (char *)malloc((contentlen + 1) * sizeof(char));
+                    memcpy(content, dataBuffer, contentlen);
+                    content[contentlen] = '\0';
 
                     // process the message body
-					if (DEBUG) {
-						//fprintf(stderr, "[%d] C: %s\n", sock, content);
-						//fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
-						for (int c = 0; c < contentlen; c++) {
-							char c_tmp[1];
-							strncpy(c_tmp, content+c, 1);
-							c_tmp[1] = '\0';
-							fprintf(stderr, "%s", c_tmp);
+                    if (DEBUG)
+                    {
+                        // fprintf(stderr, "[%d] C: %s\n", sock, content);
+                        // fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
+                        for (int c = 0; c < contentlen; c++)
+                        {
+                            char c_tmp[1];
+                            strncpy(c_tmp, content + c, 1);
+                            c_tmp[1] = '\0';
+                            fprintf(stderr, "%s", c_tmp);
 
-							// break for message body that's too long
-							if (c >= 2048) {
-								fprintf(stderr, "\n..............\n");
-								break;
-							}
-						}
-						fprintf(stderr, "\n");
-					}
+                            // break for message body that's too long
+                            if (c >= 2048)
+                            {
+                                fprintf(stderr, "\n..............\n");
+                                break;
+                            }
+                        }
+                        fprintf(stderr, "\n");
+                    }
 
                     // request to get menu webpage
                     if (reply_code == MENU)
@@ -1183,14 +1266,31 @@ void *thread_worker(void *fd)
                     else if (reply_code == UPLOAD)
                     {
                         vector<char> content_vec;
-						content_vec.assign(content, content+contentlen);
-						auto msg_pair = parse_multipart_form_data(contentType, content_vec);
-						vector<char> fdata = msg_pair.first;
-						string fname = msg_pair.second;
-						if (DEBUG) {
-							fprintf(stderr, "fname: %s\nfdata_len: %ld\n", fname.c_str(), fdata.size());
-						}
-						contentType = "";
+                        content_vec.assign(content, content + contentlen);
+                        auto msg_pair = parse_multipart_form_data(contentType, content_vec);
+                        // this is binary data
+                        vector<char> fdata = msg_pair.first;
+                        string fdataString = base64Encode(fdata);
+                        printf("the filedata is %s\n" , fdataString.c_str()) ; 
+                        // this is binary name
+                        string fname = msg_pair.second;
+
+                        string filePath = fname;
+                        // WOW
+                        // PUT user,/content/<folderPath>, base64EncodedValueOfFile
+                        printf(" the size of data is %ld\n", fdata.size());
+                        string command = "PUT " + username + ",/content/" + filePath + "," + fdataString + "\r\n";
+                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
+                        sendToBackendSocket(backend_socks[currentClientNumber].socket, command);
+                        
+                        
+
+                        DEBUG ? printf("Sent command to server\n") : 0;
+
+                        string response = readFromBackendSocket(backend_socks[currentClientNumber].socket);
+                        DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+                        // need to get complete path
+                        contentType = "";
                     }
 
                     // forbidden access
@@ -1202,13 +1302,13 @@ void *thread_worker(void *fd)
                     // send reply
                     if (reply_code == DOWNLOAD)
                     {
-                        //string filename = "/home/cis5050/Downloads/graph.jpg";
-						//string filename = "/home/cis5050/Downloads/hw2.zip";
-						string filename = "/home/cis5050/Downloads/video.mp4";
-						send_file(sock, filename);
+                        // string filename = "/home/cis5050/Downloads/graph.jpg";
+                        // string filename = "/home/cis5050/Downloads/hw2.zip";
+                        string filename = "/home/cis5050/Downloads/video.mp4";
+                        send_file(sock, filename);
 
-						// NOTE: to send the actual binary data retrieved from the backend, use
-						// send_file_data(sock, file_path, file_size, data);
+                        // NOTE: to send the actual binary data retrieved from the backend, use
+                        // send_file_data(sock, file_path, file_size, data);
                     }
 
                     string reply_string = generateReply(reply_code, username, item, sid, currentClientNumber);
