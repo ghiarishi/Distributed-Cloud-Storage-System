@@ -14,6 +14,7 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 using namespace std;
 
@@ -47,7 +48,6 @@ int PORT = 10000;
 int DEBUG = 0;
 size_t READ_SIZE = 5;
 size_t FBUFFER_SIZE = 1024;
-size_t BIGFILE_SIZE = 1024 * 1024;
 const int MAX_CLIENTS = 100;
 
 volatile int client_socks[MAX_CLIENTS];
@@ -80,18 +80,6 @@ int UPLOAD = 13;
 
 int ADMIN = 14;
 
-// MIME types map
-map<string, string> mime_types = {
-    {".txt", "text/plain"},
-    {".jpg", "image/jpeg"},
-    {".jpeg", "image/jpeg"},
-    {".png", "image/png"},
-    {".pdf", "application/pdf"},
-    {".mp3", "audio/mpeg"},
-    {".mp4", "video/mp4"},
-    {".zip", "application/zip"}
-    // Add more MIME types if needed
-};
 
 /////////////////////////////////////
 //                                 //
@@ -275,75 +263,68 @@ map<string, string> parseQuery(const string &query)
     return data;
 }
 
-// Helper function to split string by delimiter
-vector<string> split(const string &s, const string &delimiter)
-{
-    vector<string> parts;
-    size_t last = 0;
-    size_t next = 0;
-    while ((next = s.find(delimiter, last)) != string::npos)
-    {
-        parts.push_back(s.substr(last, next - last));
-        last = next + delimiter.size();
+// Helper function to split binary data by delimiter
+std::vector<std::vector<char>> split(const std::vector<char>& s, const std::string& delimiter) {
+    std::vector<std::vector<char>> parts;
+    auto it = s.begin();
+    while (it != s.end()) {
+        auto pos = std::search(it, s.end(), delimiter.begin(), delimiter.end());
+        if (pos != s.end()) {
+            parts.emplace_back(it, pos);
+            it = pos + delimiter.size();
+        } else {
+            parts.emplace_back(it, s.end());
+            break;
+        }
     }
-    parts.push_back(s.substr(last));
     return parts;
 }
 
 // Extracts the boundary from the Content-Type header
-string extract_boundary(const string &contentType)
-{
+std::string extract_boundary(const std::string& contentType) {
     size_t pos = contentType.find("boundary=");
-    if (pos == string::npos)
-        return "";
-    string boundary = contentType.substr(pos + 9);
-    if (boundary.front() == '"')
-    {
-        boundary.erase(0, 1);                // Remove the first quote
+    if (pos == std::string::npos) return "";
+    std::string boundary = contentType.substr(pos + 9);
+    if (boundary.front() == '"') {
+        boundary.erase(0, 1); // Remove the first quote
         boundary.erase(boundary.size() - 1); // Remove the last quote
     }
     return boundary;
 }
 
 // Parses the multipart/form-data content and returns file content and filename
-pair<vector<char>, string> parse_multipart_form_data(const string &contentType, const string &body)
-{
-    string boundary = extract_boundary(contentType);
-    string delimiter = "--" + boundary + "\r\n";
-    string endDelimiter = "--" + boundary + "--";
-    vector<char> fileContent;
-    string filename;
+std::pair<std::vector<char>, std::string> parse_multipart_form_data(const string& contentType, const vector<char>& body) {
+    std::string boundary = extract_boundary(contentType);
+    std::string delimiter = "--" + boundary + "\r\n";
+    std::string endDelimiter = "--" + boundary + "--";
+    std::vector<char> fileContent;
+    std::string filename;
 
-    vector<string> parts = split(body, delimiter);
+    std::vector<std::vector<char>> parts = split(body, delimiter);
 
-    for (const string &part : parts)
-    {
-        if (part.empty() || part == endDelimiter)
-        {
+    for (const auto& part : parts) {
+        if (part.empty() || std::equal(part.begin(), part.end(), endDelimiter.begin(), endDelimiter.end())) {
             continue;
         }
 
-        size_t headerEndPos = part.find("\r\n\r\n");
-        if (headerEndPos == string::npos)
-        {
+        auto headerEndPos = std::search(part.begin(), part.end(), std::begin("\r\n\r\n"), std::end("\r\n\r\n") - 1);
+        if (headerEndPos == part.end()) {
             continue; // Skip if there's no header
         }
 
-        string headers = part.substr(0, headerEndPos);
-        string content = part.substr(headerEndPos + 4, part.length() - headerEndPos - 8); // Remove last \r\n
+        std::string headers(part.begin(), headerEndPos);
+        std::vector<char> content(headerEndPos + 4, part.end() - 2); // Remove last \r\n
 
-        if (headers.find("filename=") != string::npos)
-        {
+        if (headers.find("filename=") != std::string::npos) {
             size_t namePos = headers.find("name=\"");
             size_t nameEndPos = headers.find("\"", namePos + 6);
-            string fieldName = headers.substr(namePos + 6, nameEndPos - (namePos + 6));
+            std::string fieldName = headers.substr(namePos + 6, nameEndPos - (namePos + 6));
 
             size_t filenamePos = headers.find("filename=\"");
             size_t filenameEndPos = headers.find("\"", filenamePos + 10);
             filename = headers.substr(filenamePos + 10, filenameEndPos - (filenamePos + 10));
 
-            // Convert content to vector of chars
-            fileContent.assign(content.begin(), content.end());
+            fileContent = std::move(content);
             break; // Assuming only one file per upload for simplicity
         }
     }
@@ -351,20 +332,6 @@ pair<vector<char>, string> parse_multipart_form_data(const string &contentType, 
     return {fileContent, filename};
 }
 
-string get_mime_type(const string &filename)
-{
-    size_t dot_pos = filename.rfind('.');
-    if (dot_pos != string::npos && dot_pos + 1 < filename.length())
-    {
-        string ext = filename.substr(dot_pos);
-        auto it = mime_types.find(ext);
-        if (it != mime_types.end())
-        {
-            return it->second;
-        }
-    }
-    return "application/octet-stream"; // Default MIME type
-}
 
 void send_chunk(int client_socket, const vector<char> &data)
 {
@@ -387,43 +354,62 @@ void send_file(int client_socket, const string &file_path)
     auto file_size = file.tellg();
     file.seekg(0, ios::beg);
 
-    string mime_type = get_mime_type(file_path);
     stringstream header;
     header << "HTTP/1.1 200 OK\r\n";
     header << "Content-Type: application/octet-stream\r\n";
 
     string file_name = getFileName(file_path);
 
-    // if (file_size < BIGFILE_SIZE) {
-    if (true)
-    {
-        header << "Content-Length: " << file_size << "\r\n";
-        header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
-        header << "\r\n";
 
-        send(client_socket, header.str().c_str(), header.str().size(), 0);
-        if (DEBUG)
-        {
-            fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
-        }
+    header << "Content-Length: " << file_size << "\r\n";
+    header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
+    header << "\r\n";
 
-        char buffer[FBUFFER_SIZE];
-        while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
-        {
-            send(client_socket, buffer, file.gcount(), 0);
-        }
-        if (DEBUG)
-        {
-            fprintf(stderr, "[%d] S: file sent for downloading\n", client_socket);
-        }
-    }
-    else
+    send(client_socket, header.str().c_str(), header.str().size(), 0);
+    if (DEBUG)
     {
-        header << "Transfer-Encoding: chunked\r\n"
-               << "\r\n";
+        fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
     }
+
+    char buffer[FBUFFER_SIZE];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
+    {
+        send(client_socket, buffer, file.gcount(), 0);
+    }
+    if (DEBUG)
+    {
+        fprintf(stderr, "[%d] S: file sent for downloading\n", client_socket);
+    }
+
     file.close();
 }
+
+// send file data to the client. file_path is the path in the backend (used for getting filename).
+void send_file_data(int client_socket, string file_path, int file_size, char *data) {
+
+    stringstream header;
+    header << "HTTP/1.1 200 OK\r\n";
+    header << "Content-Type: application/octet-stream\r\n";
+
+    string file_name = getFileName(file_path);
+
+	header << "Content-Length: " << file_size << "\r\n";
+	header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
+	header << "\r\n";
+
+	send(client_socket, header.str().c_str(), header.str().size(), 0);
+	if (DEBUG) {
+		fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
+	}
+
+	char buffer[FBUFFER_SIZE];
+	send(client_socket, data, file_size, 0);
+	if (DEBUG) {
+		fprintf(stderr, "[%d] S: file sent for downloading\n", client_socket);
+    }
+
+}
+
 
 string generate_cookie()
 {
@@ -1075,25 +1061,28 @@ void *thread_worker(void *fd)
                 }
                 else
                 {
-                    char content[contentlen];
-                    strncpy(content, dataBuffer, contentlen);
-                    content[contentlen] = '\0';
+                    char *content = (char *)malloc((contentlen+1) * sizeof(char));
+					memcpy(content, dataBuffer, contentlen);
+					content[contentlen] = '\0';
 
                     // process the message body
-                    if (DEBUG)
-                    {
-                        // fprintf(stderr, "[%d] C: %s\n", sock, content);
-                        // fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
-                        fprintf(stderr, "[%d] C: ", sock);
-                        for (int c = 0; c < contentlen; c++)
-                        {
-                            char c_tmp[1];
-                            strncpy(c_tmp, content + c, 1);
-                            c_tmp[1] = '\0';
-                            fprintf(stderr, "%s", c_tmp);
-                        }
-                        fprintf(stderr, "\n");
-                    }
+					if (DEBUG) {
+						//fprintf(stderr, "[%d] C: %s\n", sock, content);
+						//fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
+						for (int c = 0; c < contentlen; c++) {
+							char c_tmp[1];
+							strncpy(c_tmp, content+c, 1);
+							c_tmp[1] = '\0';
+							fprintf(stderr, "%s", c_tmp);
+
+							// break for message body that's too long
+							if (c >= 2048) {
+								fprintf(stderr, "\n..............\n");
+								break;
+							}
+						}
+						fprintf(stderr, "\n");
+					}
 
                     // request to get menu webpage
                     if (reply_code == MENU)
@@ -1193,14 +1182,15 @@ void *thread_worker(void *fd)
 
                     else if (reply_code == UPLOAD)
                     {
-                        auto msg_pair = parse_multipart_form_data(contentType, string(content));
-                        vector<char> fdata = msg_pair.first;
-                        string fname = msg_pair.second;
-                        if (DEBUG)
-                        {
-                            fprintf(stderr, "fname: %s\nfdata_len: %ld\n", fname.c_str(), fdata.size());
-                        }
-                        contentType = "";
+                        vector<char> content_vec;
+						content_vec.assign(content, content+contentlen);
+						auto msg_pair = parse_multipart_form_data(contentType, content_vec);
+						vector<char> fdata = msg_pair.first;
+						string fname = msg_pair.second;
+						if (DEBUG) {
+							fprintf(stderr, "fname: %s\nfdata_len: %ld\n", fname.c_str(), fdata.size());
+						}
+						contentType = "";
                     }
 
                     // forbidden access
@@ -1212,10 +1202,13 @@ void *thread_worker(void *fd)
                     // send reply
                     if (reply_code == DOWNLOAD)
                     {
-                        // string filename = "/home/cis5050/Downloads/graph.jpg";
-                        // string filename = "/home/cis5050/Downloads/hw2.zip";
-                        string filename = "/home/cis5050/Downloads/video.mp4";
-                        send_file(sock, filename);
+                        //string filename = "/home/cis5050/Downloads/graph.jpg";
+						//string filename = "/home/cis5050/Downloads/hw2.zip";
+						string filename = "/home/cis5050/Downloads/video.mp4";
+						send_file(sock, filename);
+
+						// NOTE: to send the actual binary data retrieved from the backend, use
+						// send_file_data(sock, file_path, file_size, data);
                     }
 
                     string reply_string = generateReply(reply_code, username, item, sid, currentClientNumber);
@@ -1235,6 +1228,7 @@ void *thread_worker(void *fd)
                     read_body = 0;
                     contentlen = 0;
                     // content_read = 0;
+                    free(content);
                 }
                 continue;
             }
