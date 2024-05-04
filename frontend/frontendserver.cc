@@ -85,6 +85,47 @@ int UPLOAD = 13;
 
 int ADMIN = 14;
 
+
+/////////////////////////////////////
+//								   //
+//			 Heartbeat             //
+//								   //
+/////////////////////////////////////
+
+const int BUF_SIZE = 1024;
+
+struct sockaddr_in serverSock;
+int udpsock;
+
+void* handleHeartbeat(void* arg) {
+    char buffer[BUF_SIZE];
+    struct sockaddr_in clientAddr;
+    socklen_t clientAddrLen = sizeof(clientAddr);
+
+    while (true) {
+        int received = recvfrom(udpsock, buffer, BUF_SIZE, 0, (struct sockaddr *)&clientAddr, &clientAddrLen);
+        if (received > 0) {
+            buffer[received] = '\0';
+            if (DEBUG) {
+            	std::cout << "Received heartbeat: " << buffer << std::endl;
+            }
+            if (string(buffer) == "DISABLE") {
+            	raise(SIGINT);
+            }
+
+            // Send a response integer back to the client
+            int response_int = num_client;
+            char response[1024];
+            sprintf(response, "%d", response_int);
+            sendto(udpsock, response, strlen(response), 0, (struct sockaddr *)&clientAddr, sizeof(clientAddr));
+            if (DEBUG) {
+            	std::cout << "Sent response: " << response << std::endl;
+            }
+        }
+    }
+    return nullptr;
+}
+
 /////////////////////////////////////
 //                                 //
 //        Extract Methods                //
@@ -1665,7 +1706,20 @@ void *thread_worker(void *fd)
         }
         else
         {
-            continue;
+        	// client exit
+        	free(dataBuffer);
+			close(sock);
+			for (int i = 0; i < MAX_CLIENTS; i++) {
+				if (client_socks[i] == sock) {
+					client_socks[i] = 0;
+					break;
+				}
+			}
+        	if (DEBUG) {
+				fprintf(stderr, "[%d] Connection closed\n", sock);
+			}
+        	num_client -= 1;
+			pthread_exit(NULL);
         }
     }
 }
@@ -1730,7 +1784,29 @@ int main(int argc, char *argv[])
     mail_sock = connectToMail();
     printf("connected to mailSock\n");
 
+    //////////////////////
+	// Heartbeat thread //
+	//////////////////////
 
+    udpsock = socket(AF_INET, SOCK_DGRAM, 0);
+
+	memset((char *) &serverSock, 0, sizeof(serverSock));
+	serverSock.sin_family = AF_INET;
+	serverSock.sin_port = htons(PORT+10000);
+	serverSock.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	if (bind(udpsock, (struct sockaddr *)&serverSock, sizeof(serverSock)) < 0) {
+		std::cerr << "Error binding socket" << std::endl;
+		return 1;
+	}
+
+	pthread_t threadId;
+	pthread_create(&threadId, nullptr, handleHeartbeat, nullptr);
+
+	///////////////
+	// Main loop //
+	///////////////
+    
     while (1)
     {
         if (num_client >= MAX_CLIENTS)
