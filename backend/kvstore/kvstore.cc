@@ -754,8 +754,12 @@ void adminConsoleSignalHandler() {
                 // command is complete
                 if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
                     printDebug("[adminConsoleSignalHandler] Command received from admin: " + command);
+                    vector<string> commands;
+                    if(command.find(' ') != string::npos) {
+                        commands = splitKVStoreCommand(command);
+                    }
                     
-                    string temp = command;
+                    string temp = commands.size() > 0 ? commands[0] : command;
                     for (char &c : temp) {
                         c = std::toupper(c);
                     }
@@ -775,6 +779,18 @@ void adminConsoleSignalHandler() {
                     } else if (temp == "DISABLE" && enabled) {
                         enabled = false; // set flag to disabled
                         response = "+OK\r\n";
+                    } else if (temp == "GETALL ") {
+                        int skip = stoi(commands[1]);
+                        response = "+OK\n";
+                        int count = 0;
+                        for (const auto& row : table) {
+                            for (const auto& column : row.second) {
+                                if (count >= skip && count < skip + 3) {
+                                    response += row.first + "," + column.first + "," + column.second + "\n";
+                                }
+                                count++;
+                            }
+                        }
                     } else {
                         response = "-ERR Invalid Command\r\n";
                     }
