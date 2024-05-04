@@ -85,6 +85,7 @@ int UPLOAD = 13;
 
 int ADMIN = 14;
 int SIGNUP = 20;
+int NEWPASS = 21;
 
 
 /////////////////////////////////////
@@ -853,30 +854,44 @@ string renderAdminPage()
 
     return reply;
 }
+
 // render the login webpage
-string renderLoginPage(string sid)
-{
+string renderLoginPage(string sid) {
 
-    string content = "";
-    content += "<html>\n";
-    content += "<head><title>Login Page</title></head>\n";
-    content += "<body>\n";
-    content += "<h1>PennCloud Login</h1>\n";
-    content += "<form action=\"/menu\" method=\"post\">\n";
-    content += "Username: <input type=\"text\" name=\"username\"><br>\n";
-    content += "Password: <input type=\"password\" name=\"password\"><br>\n";
-    content += "<input type=\"submit\" value=\"Submit\">\n";
-    content += "</form>\n";
-    content += "</body>\n";
-    content += "</html>\n";
+	string content = "";
+	content += "<html>\n";
+	content += "<head><title>Login Page</title></head>\n";
+	content += "<body>\n";
+	content += "<h1>PennCloud Login</h1>\n";
+	content += "<h2>Log in</h2>\n";
+	content += "<form action=\"/menu\" method=\"post\">\n";
+	content += "Username: <input type=\"text\" name=\"username\"><br>\n";
+	content += "Password: <input type=\"password\" name=\"password\"><br>\n";
+	content += "<input type=\"submit\" value=\"Submit\">\n";
+	content += "</form>\n";
+	content += "<h2>Sign Up</h2>\n";
+	content += "<form action=\"/signup\" method=\"post\">\n";
+	content += "Username: <input type=\"text\" name=\"username\"><br>\n";
+	content += "Password: <input type=\"password\" name=\"password\"><br>\n";
+	content += "<input type=\"submit\" value=\"Submit\">\n";
+	content += "</form>\n";
+	content += "<h2>Change Password</h2>\n";
+	content += "<form action=\"/signup\" method=\"post\">\n";
+	content += "Username: <input type=\"text\" name=\"username\"><br>\n";
+	content += "Old Password: <input type=\"text\" name=\"oldpass\"><br>\n";
+	content += "New Password: <input type=\"text\" name=\"newpass\"><br>\n";
+	content += "<input type=\"submit\" value=\"Submit\">\n";
+	content += "</form>\n";
+	content += "</body>\n";
+	content += "</html>\n";
 
-    string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\n" +
-                    "Set-Cookie: sid=" + sid +
-                    "\r\n\r\n";
-    string reply = header + content;
+	string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "+ \
+					to_string(content.length()) + "\r\n" +\
+					"Set-Cookie: sid=" + sid + \
+					"\r\n\r\n";
+	string reply = header + content;
 
-    return reply;
+	return reply;
 }
 
 // render the menu webpage
@@ -1113,7 +1128,10 @@ string generateReply(int reply_code, string username = "", string item = "", str
     {
         return renderLoginPage(sid);
     }
-	if (reply_code == SIGNUP) {
+	else if (reply_code == SIGNUP) {
+		return renderLoginPage(sid);
+	}
+	else if (reply_code == NEWPASS) {
 		return renderLoginPage(sid);
 	}
     else if (reply_code == REDIRECT)
@@ -1328,6 +1346,15 @@ void *thread_worker(void *fd)
 						//TODO store the username and password here
 					}
 
+					else if (reply_code == NEWPASS) {
+						map<string, string> msg_map = parseQuery(string(content));
+						string username = msg_map["username"];
+						string oldpass = msg_map["oldpass"];
+						string newpass = msg_map["newpass"];
+
+						//TODO store the username and password here
+					}
+
                     // send or reply email
                     else if (reply_code == SENDEMAIL)
                     {
@@ -1451,7 +1478,7 @@ void *thread_worker(void *fd)
                     }
 
                     // forbidden access
-                    if (reply_code != LOGIN && reply_code != REDIRECT && (logged_in != 1 || sid != tmp_sid))
+                    if (reply_code != LOGIN && reply_code != SIGNUP && reply_code != NEWPASS && reply_code != REDIRECT && (logged_in != 1 || sid != tmp_sid))
                     {
                         reply_code = FORBIDDEN;
                     }
@@ -1561,7 +1588,7 @@ void *thread_worker(void *fd)
                         {
                             // forbidden access
 
-                            if (reply_code != LOGIN && (logged_in != 1 || sid != tmp_sid))
+                            if (reply_code != LOGIN && reply_code != SIGNUP && reply_code != NEWPASS && (logged_in != 1 || sid != tmp_sid))
                             {
                                 reply_code = FORBIDDEN;
                             }
@@ -1645,6 +1672,10 @@ void *thread_worker(void *fd)
 
 					if (strcmp(url, "/signup") == 0) {
 						reply_code = SIGNUP;
+					}
+
+					else if (strcmp(url, "/newpass") == 0) {
+						reply_code = NEWPASS;
 					}
 					
                     // redirect to menu page
