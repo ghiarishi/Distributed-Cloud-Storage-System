@@ -76,7 +76,6 @@ void handleIncomingRequests() {
                 // command is complete
                 if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
                     printDebug("[handleIncomingRequests] Command received from frontend: " + command);
-
                     string temp = command;
                     for (char &c : temp) {
                         c = toupper(c);
@@ -545,7 +544,6 @@ void recvHeartbeat() {
 int main(int argc, char *argv[]){
 
     parseArguments(argc, argv);
-
     parseServers(configFilePath, servers);
         
     // Initialize round-robin index to 0 for each replica group
