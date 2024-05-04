@@ -860,10 +860,6 @@ void* threadFunc(void* arg) {
     int bytesRead;
 
     while (true) {
-        
-        if (!enabled) {
-            continue;
-        }
 
         bytesRead = read(conFD, buffer, BUFFER_SIZE);
         if (bytesRead < 0) {
@@ -873,6 +869,15 @@ void* threadFunc(void* arg) {
         } else if (bytesRead == 0) {
             // Connection closed by client
             break;
+        }
+
+        if (!enabled) {
+            msg = "-ERR Server Disabled\r\n";
+            if (write(conFD, msg.c_str(), msg.length()) < 0) {
+                fprintf(stderr, "Failed to write: %s\n", strerror(errno));
+                
+            }
+            continue;
         }
 
         for (int i = 0; i < bytesRead; ++i) {
