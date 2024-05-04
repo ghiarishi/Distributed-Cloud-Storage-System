@@ -11,9 +11,13 @@
 #include <iomanip>
 #include <mutex>
 #include <ctime>
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
 
 using namespace std;
 
+string configFilePath = "config.txt";
 map<int, ServerInfo> primaryServers; // replica group numbers mapped to the primary server info for that group
 unordered_map<int, int> nextServerRoundRobin; // which server to send to frontend next for each repica group
 unordered_map<string, chrono::steady_clock::time_point> last_heartbeat; // most recent time of heartbeat for each repID:tcpPort 
@@ -72,14 +76,18 @@ void handleIncomingRequests() {
                 // command is complete
                 if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
                     printDebug("[handleIncomingRequests] Command received from frontend: " + command);
+                    string temp = command;
+                    for (char &c : temp) {
+                        c = toupper(c);
+                    }
 
-                    if (command.substr(0,11) == "GET_SERVER:") {
+                    if (temp.substr(0,11) == "GET_SERVER:") {
                         string username = command.substr(11);
                         
                         int replicaGroup;
 
                         // assign the replica group based on first character of the username
-                        char firstChar = std::tolower(username[0]);
+                        char firstChar = tolower(username[0]);
 
                         if (firstChar >= 'a' && firstChar <= 'i') {
                             replicaGroup = 1;
@@ -295,6 +303,153 @@ void checkHeartbeats() {
     }
 }
 
+string base64Encode(const vector<char>& data) {
+    // Create a BIO object for base64 encoding
+    BIO* bio = BIO_new(BIO_s_mem());
+    BIO* base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Write data to BIO
+    BIO_write(bio, data.data(), data.size());
+    BIO_flush(bio);
+
+    // Get the encoded data
+    BUF_MEM* bio_buf;
+    BIO_get_mem_ptr(bio, &bio_buf);
+
+    // Convert the encoded data to a string
+    string encoded_data(bio_buf->data, bio_buf->length);
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return encoded_data;
+}
+
+// function to send config file to admin console
+void sendToAdminConsole(int conFD){
+    // Open the file in binary mode
+    ifstream file(configFilePath, ios::binary);
+    if (!file) {
+        cerr << "Cannot open file: " << configFilePath << endl;
+        return;
+    }
+    
+    // Read the file into a vector
+    vector<char> file_contents((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+
+    // Encode the file contents
+    string encoded_string = base64Encode(file_contents);
+
+    size_t dataLength = encoded_string.size();
+
+
+    for (size_t offset = 0; offset < dataLength; offset += BUFFER_SIZE) {
+        // Calculate the number of bytes to send
+        int bytesToSend = std::min(BUFFER_SIZE, static_cast<int>(dataLength - offset));
+        
+        // Send the data in chunks of BUFFER_SIZE
+        if (write(conFD, encoded_string.c_str() + offset, bytesToSend) != bytesToSend) {
+            std::cerr << "Send failed\n";
+            break;
+        }
+    }
+
+    // Send a newline at the end of the transmission
+    write(conFD, "\r\n", 2);
+
+    printDebug("Config file sent to Admin Console");
+
+}
+
+void receiveAdminConsoleRequest(){
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket: " << strerror(errno) << endl;
+        return;
+    }
+
+    // ensure socket closes, and new socket can be opened
+    int option = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR|SO_REUSEPORT, &option, sizeof(option)) < 0){
+        fprintf(stderr, "Failed to setsockopt: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+    servaddr.sin_port = htons(myInfo.tcpPort2);
+
+    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        cerr << "Bind failed: " << strerror(errno) << endl;
+        close(sockfd);
+        return;
+    }
+
+    listen(sockfd, 5);
+
+    while (true) {  // main accept() loop
+        int conFD = accept(sockfd, NULL, NULL);
+        if (conFD < 0) {
+            cerr << "Error on accept: " << strerror(errno) << endl;
+            continue;
+        }
+
+        char buffer[BUFFER_SIZE];
+        string command;
+        int bytesRead;
+
+        bytesRead = read(conFD, buffer, sizeof(buffer));
+        if (bytesRead < 0) {
+            cerr << "Failed to read: " << strerror(errno) << endl;
+        } else if (bytesRead == 0) {
+            // connection closed by client
+            printDebug("Connection closed by admin");
+        } else {
+            for (int i = 0; i < bytesRead; ++i) {
+                char ch = buffer[i];
+                    
+                // command is complete
+                if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
+                    printDebug("[adminConsoleSignalHandler] Command received from admin: " + command);
+                    
+                    string temp = command;
+                    for (char &c : temp) {
+                        c = std::toupper(c);
+                    }
+
+                    string response;
+
+                    if (temp == "REQUEST") {
+                        sendToAdminConsole(conFD);
+
+                    } else {
+                        response = "-ERR Invalid Command\r\n";
+                    }
+
+                    printDebug("[adminConsoleSignalHandler] Replied to admin console: " + response);
+
+                    // send the response to the admin console
+                    write(conFD, response.c_str(), response.length());
+
+                    command.clear();
+                    
+                    // skip \n
+                    i++;
+                } else {
+                    command += ch;
+                }
+            }
+        }
+        // close the connection to the frontend server
+        close(conFD);  
+    }
+    close(sockfd);
+}
+
 // function to receive heartbeats from servers to ensure they are alive
 void recvHeartbeat() {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -359,7 +514,7 @@ void recvHeartbeat() {
                     if (primaryServers.find(replicaGroup) == primaryServers.end()){
                         info.isPrimary = true;
                         primaryServers[replicaGroup] = info;
-                        cout<<to_string(senderTCP)<<" assigned as PRIMARY in group "<<to_string(replicaGroup)<<endl;
+                        printDebug(info.ip + ":" + to_string(senderTCP) + "assigned as primary in group " + to_string(replicaGroup));
                     } 
 
                     ServerInfo deadInfo;
@@ -389,8 +544,7 @@ void recvHeartbeat() {
 int main(int argc, char *argv[]){
 
     parseArguments(argc, argv);
-
-    parseServers("config.txt", servers);
+    parseServers(configFilePath, servers);
         
     // Initialize round-robin index to 0 for each replica group
     for (const auto& pair : servers) {
@@ -409,6 +563,9 @@ int main(int argc, char *argv[]){
     // listen for frontend requests
     thread requestHandlerHelper(handleIncomingRequests);
     requestHandlerHelper.detach();
+
+    thread adminRequestHandlerThread(receiveAdminConsoleRequest);
+    adminRequestHandlerThread.detach();
 
     // listen for heartbeats
     recvHeartbeat();

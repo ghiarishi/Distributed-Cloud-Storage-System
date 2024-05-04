@@ -30,6 +30,7 @@ struct ServerInfo {
     int tcpPort; // communication with frontend port
     int udpPort; // heartbeat port
     int udpPort2; // status message port
+    int tcpPort2; // enable disable port
     bool isPrimary = false; // secondary by default
     bool isDead = true; // dead by default
     int replicaGroup;
@@ -145,7 +146,7 @@ void parseServers(const string& filename, ServerMap& servers) {
             }
         }
 
-        if (parts.size() != 5) {
+        if (parts.size() != 6) {
             cerr << "Invalid line format: " << line << endl;
             // skip malformed lines
             continue;  
@@ -158,6 +159,7 @@ void parseServers(const string& filename, ServerMap& servers) {
         info.tcpPort = stoi(parts[2]);
         info.udpPort = stoi(parts[3]);
         info.udpPort2 = stoi(parts[4]);
+        info.tcpPort2 = stoi(parts[5]);
 
         servers[info.replicaGroup].push_back(info);
     }
