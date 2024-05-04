@@ -1,22 +1,14 @@
-TARGETS = kvstore master # test1 test2 test3
+TARGETS = kvstore master
 CXXFLAGS = -w
+LDFLAGS = -pthread -lssl -lcrypto
 
 all: $(TARGETS)
 
 kvstore: kvstore.cc helper.h
-	g++ $(CXXFLAGS) $^ -pthread -o $@
+	g++ $(CXXFLAGS) kvstore.cc -o $@ $(LDFLAGS)
 
 master: master.cc helper.h
-	g++ $(CXXFLAGS) $^ -pthread -o $@
-
-# test1: test1.cc
-# 	g++ $(CXXFLAGS) $^ -pthread -o $@
-
-# test2: test2.cc
-# 	g++ $(CXXFLAGS) $^ -pthread -o $@
-
-# test3: test3.cc
-# 	g++ $(CXXFLAGS) $^ -pthread -o $@
+	g++ $(CXXFLAGS) master.cc -o $@ $(LDFLAGS)
 
 clean:
 	rm -fv $(TARGETS) *~ *.o
