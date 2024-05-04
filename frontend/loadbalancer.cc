@@ -37,9 +37,9 @@ volatile int shutting_down = 0;
 
 const int BUF_SIZE = 1024;
 const vector<int> ports = {20000, 20001, 20002};
-map<int, int> server_status = {{20000,1}, {20001,1}, {20002,1}};
+map<int, int> server_status = {{20000,0}, {20001,0}, {20002,0}};
 map<int, int> server_load = {{20000,0}, {20001, 0}, {20002,0}};
-map<int, int> port_map = {{20000,10000}, {20001, 10001}, {20002,10002}};
+//map<int, int> port_map = {{20000,10000}, {20001, 10001}, {20002,10002}};
 const int TIMEOUT_SECONDS = 5;
 
 struct sockaddr_in localSock;
@@ -130,7 +130,7 @@ int choose_port() {
 	for (auto const& status : server_status) {
 		if (status.second) {
 			if (server_load[status.first] < min_clients) {
-				port = port_map[status.first];
+				port = status.first - 10000;
 				min_clients = server_load[status.first];
 			}
 		}
