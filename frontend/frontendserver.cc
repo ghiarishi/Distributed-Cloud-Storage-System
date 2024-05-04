@@ -15,7 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-#include <chrono> 
+#include <chrono>
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
 #include <openssl/evp.h>
@@ -53,6 +53,7 @@ int DEBUG = 0;
 size_t READ_SIZE = 5;
 size_t FBUFFER_SIZE = 1024;
 const int MAX_CLIENTS = 100;
+int mail_sock;
 
 volatile int client_socks[MAX_CLIENTS];
 volatile int num_client;
@@ -121,8 +122,8 @@ vector<pair<string, int>> extractFiles(string username, string returnString)
     for (string currPath : paths)
     {
         string fileName = getFileName(currPath);
-        int isFile = (currPath.find('.') != std::string::npos);
-        pair<string, int> filePair = make_pair(fileName, isFile);
+        int isFolder = (currPath.find('.') == std::string::npos);
+        pair<string, int> filePair = make_pair(fileName, isFolder);
         files.push_back(filePair);
     }
     return files;
@@ -193,10 +194,32 @@ pair<string, int> extractIPAndPort(const string &serverInfo)
 //                                 //
 /////////////////////////////////////
 
-string base64Encode(const std::vector<char>& data) {
+std::string base64Decode(const std::string& input) {
+    // Create a Base64 filter/source
+    BIO *b64 = BIO_new(BIO_f_base64());
+    BIO *bio = BIO_new_mem_buf(input.c_str(), -1); // Use -1 for null-terminated strings
+
+    // Set the BIO chain
+    bio = BIO_push(b64, bio);
+
+    // Create a vector to store the decoded data
+    std::vector<char> buffer(input.size()); // Allocate space for decoded data
+
+    // Read the decoded data into the buffer
+    int decodedLength = BIO_read(bio, buffer.data(), input.size());
+
+    // Clean up
+    BIO_free_all(bio);
+
+    // Return the decoded string
+    return std::string(buffer.data(), decodedLength);
+}
+
+string base64Encode(const vector<char> &data)
+{
     // Create a BIO object for base64 encoding
-    BIO* bio = BIO_new(BIO_s_mem());
-    BIO* base64 = BIO_new(BIO_f_base64());
+    BIO *bio = BIO_new(BIO_s_mem());
+    BIO *base64 = BIO_new(BIO_f_base64());
     BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
     bio = BIO_push(base64, bio);
 
@@ -205,7 +228,7 @@ string base64Encode(const std::vector<char>& data) {
     BIO_flush(bio);
 
     // Get the encoded data
-    BUF_MEM* bio_buf;
+    BUF_MEM *bio_buf;
     BIO_get_mem_ptr(bio, &bio_buf);
 
     // Convert the encoded data to a std::string
@@ -415,7 +438,7 @@ void send_chunk(int client_socket, const vector<char> &data)
     send(client_socket, "\r\n", 2, 0);
 }
 
-void send_file(int client_socket, const string &file_path)
+void send_file(int client_socket, const string &file_path, string file_data)
 {
     ifstream file(file_path, ios::binary | ios::ate);
 
@@ -438,11 +461,13 @@ void send_file(int client_socket, const string &file_path)
         fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
     }
 
-    char buffer[FBUFFER_SIZE];
-    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
-    {
-        send(client_socket, buffer, file.gcount(), 0);
-    }
+    // char buffer[FBUFFER_SIZE];
+    // while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
+    // {
+    //     send(client_socket, buffer, file.gcount(), 0);
+    // }
+    // send(client_socket, file_data.c_str(), file_data.size(), 0);
+
     if (DEBUG)
     {
         fprintf(stderr, "[%d] S: file sent for downloading\n", client_socket);
@@ -533,6 +558,62 @@ string readFromBackendSocket(int backend_sock)
     }
 
     return response;
+}
+
+int connectToMail()
+{
+    int mail_sock_temp;
+    struct sockaddr_in server_addr;
+
+    // Open master socket
+    if ((mail_sock_temp = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        std::cerr << "Error creating socket" << std::endl;
+        return -1;
+    }
+
+    // Server address
+    bzero(&server_addr, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(2500);
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    inet_pton(AF_INET, "127.0.0.1", &(server_addr.sin_addr));
+
+    // Connect to server
+    if (connect(mail_sock_temp, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        std::cerr << "Error connecting to server" << std::endl;
+        return -1;
+    }
+
+    DEBUG ? printf("Connected to Server\n") : 0;
+
+    // Send command to server
+    string command = "HELO tester\r\n";
+    if (send(mail_sock_temp, command.c_str(), command.length(), 0) < 0)
+    {
+        std::cerr << "Error sending command to server" << std::endl;
+        return -1;
+    }
+
+    DEBUG ? printf("Sent command to Server\n") : 0;
+
+    // Receive server info
+    char serverInfo[1024];
+    if (recv(mail_sock_temp, serverInfo, sizeof(serverInfo), 0) < 0)
+    {
+        std::cerr << "Error receiving response from server" << std::endl;
+        return -1;
+    }
+
+    DEBUG ? printf("Received response |%s|\n", serverInfo) : 0;
+    string serverInfoString(serverInfo);
+    if (serverInfoString.find("220 localhost service ready") == std::string::npos){
+        std::cerr << "Recived error response from server" << std::endl;
+        return -1;
+    }
+
+    return mail_sock_temp;
 }
 
 int connectToBackend(string username, int clientNum)
@@ -897,7 +978,7 @@ string renderMailboxPage(string username, int currentClientNumber)
 // render the email content page for an email (item)
 string renderEmailPage(string username, string item, int currentClientNumber)
 {
-    string content = getEmailContent(item, currentClientNumber);
+    string content;
     if (item == "send")
     {
         content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
@@ -913,6 +994,12 @@ string renderEmailPage(string username, string item, int currentClientNumber)
     }
     else
     {
+        string emailContent = getEmailContent(item, currentClientNumber);
+        string decodedEmail = base64Decode(emailContent);
+        content += "decodedEmail : " + decodedEmail + "\n";
+        content += "encodedEmail : " + emailContent + "\n";
+        printf("encoded email is %s\n", emailContent.c_str());
+        printf("decoded email is %s\n", decodedEmail.c_str());
         content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
         content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
         content += "<title>Email Viewer</title>";
@@ -1199,6 +1286,27 @@ void *thread_worker(void *fd)
                         {
                             fprintf(stderr, "to: %s\nsubject: %s\nmessage: %s\n", to.c_str(), subject.c_str(), message.c_str());
                         }
+                        // at this point we have the wow wow 
+                        // at this point we have the parts of the email
+                        //send to mail the parts 
+                        string mailFrom = "MAIL FROM:<" + username + "@localhost>\r\n";
+                        sendToBackendSocket(mail_sock , mailFrom);
+                        string response = readFromBackendSocket(mail_sock);
+                        DEBUG ? printf("Response is %s\n", response.c_str()) : 0;
+                        // if ( !containsSubstring(response , "250 OK")){
+                        //     break;
+                        // }
+                        // now we need to say who its to 
+                        string mailTo = "RCPT TO:<" + to + ">\r\n";
+                        sendToBackendSocket(mail_sock , mailTo);
+                        // even if its non existent thats ok 
+                        response = readFromBackendSocket(mail_sock);
+                        // now send data message
+                        sendToBackendSocket(mail_sock , "DATA\r\n");
+                        response = readFromBackendSocket(mail_sock);
+                        // now send data 
+                        sendToBackendSocket(mail_sock , subject + "\r\n" + message + "\r\n\r\n.\r\n");
+                        response = readFromBackendSocket(mail_sock);
                     }
                     // forward email
                     else if (reply_code == FORWARD)
@@ -1271,22 +1379,18 @@ void *thread_worker(void *fd)
                         // this is binary data
                         vector<char> fdata = msg_pair.first;
                         string fdataString = base64Encode(fdata);
-                        printf("the filedata is %s\n" , fdataString.c_str()) ; 
+                        printf("the filedata is %s\n", fdataString.c_str());
                         // this is binary name
                         string fname = msg_pair.second;
 
                         string filePath = fname;
-                        // WOW
                         // PUT user,/content/<folderPath>, base64EncodedValueOfFile
                         printf(" the size of data is %ld\n", fdata.size());
                         string command = "PUT " + username + ",/content/" + filePath + "," + fdataString + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
                         sendToBackendSocket(backend_socks[currentClientNumber].socket, command);
-                        
-                        
 
                         DEBUG ? printf("Sent command to server\n") : 0;
-
                         string response = readFromBackendSocket(backend_socks[currentClientNumber].socket);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                         // need to get complete path
@@ -1302,13 +1406,20 @@ void *thread_worker(void *fd)
                     // send reply
                     if (reply_code == DOWNLOAD)
                     {
-                        // string filename = "/home/cis5050/Downloads/graph.jpg";
-                        // string filename = "/home/cis5050/Downloads/hw2.zip";
-                        string filename = "/home/cis5050/Downloads/video.mp4";
-                        send_file(sock, filename);
+                        string contentStr(content);
+                        printf("content is %s\n", content);
+                        size_t pos = contentStr.find('=');
+                        string filename = contentStr.substr(pos + 1);
+                        string downloadLocation = "/home/cis5050/Downloads/" + contentStr.substr(pos + 1);
+                        printf("filename is %s\n", filename.c_str());
+                        // send_file(sock, filename);
+                        string command = "GET " + username + ",/content/" + contentStr.substr(pos + 1) + "\r\n";
+                        DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
 
                         // NOTE: to send the actual binary data retrieved from the backend, use
-                        // send_file_data(sock, file_path, file_size, data);
+                        sendToBackendSocket(backend_socks[currentClientNumber].socket, command);
+                        string response = readFromBackendSocket(backend_socks[currentClientNumber].socket);
+                        send_file_data(sock, downloadLocation, response.size(), &response[0]);
                     }
 
                     string reply_string = generateReply(reply_code, username, item, sid, currentClientNumber);
@@ -1614,6 +1725,12 @@ int main(int argc, char *argv[])
     bind(listen_fd, (struct sockaddr *)&servaddr, sizeof(servaddr));
     listen(listen_fd, 10);
 
+    printf("about to connect to mailSock\n");
+    // set mailSocket
+    mail_sock = connectToMail();
+    printf("connected to mailSock\n");
+
+
     while (1)
     {
         if (num_client >= MAX_CLIENTS)
@@ -1647,3 +1764,5 @@ int main(int argc, char *argv[])
 
     exit(0);
 }
+
+
