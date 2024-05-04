@@ -84,6 +84,7 @@ int NEWDIR = 12;
 int UPLOAD = 13;
 
 int ADMIN = 14;
+int SIGNUP = 20;
 
 
 /////////////////////////////////////
@@ -1112,6 +1113,9 @@ string generateReply(int reply_code, string username = "", string item = "", str
     {
         return renderLoginPage(sid);
     }
+	if (reply_code == SIGNUP) {
+		return renderLoginPage(sid);
+	}
     else if (reply_code == REDIRECT)
     {
         return redirectReply();
@@ -1315,6 +1319,14 @@ void *thread_worker(void *fd)
                             logged_in = 1;
                         }
                     }
+
+					else if (reply_code == SIGNUP) {
+						tuple<string, string> credentials = parseLoginData(string(content));
+						username = get<0>(credentials);
+						string password = get<1>(credentials);
+
+						//TODO store the username and password here
+					}
 
                     // send or reply email
                     else if (reply_code == SENDEMAIL)
@@ -1631,8 +1643,12 @@ void *thread_worker(void *fd)
                     strtok(tmp, " ");
                     char *url = strtok(NULL, " ");
 
+					if (strcmp(url, "/signup") == 0) {
+						reply_code = SIGNUP;
+					}
+					
                     // redirect to menu page
-                    if (strcmp(url, "/menu") == 0)
+                    else if (strcmp(url, "/menu") == 0)
                     {
                         reply_code = MENU;
                     }
