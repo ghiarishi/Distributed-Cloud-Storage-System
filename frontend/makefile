@@ -18,11 +18,14 @@
 #clean:
 #	rm -f $(TARGET)
 
-TARGETS = frontendserver
+TARGETS = frontendserver loadbalancer
 
 all: $(TARGETS)
 
 frontendserver: frontendserver.cc
+	g++ $^ -lpthread -g -o $@
+
+loadbalancer: loadbalancer.cc
 	g++ $^ -lpthread -g -o $@
 
 clean::
