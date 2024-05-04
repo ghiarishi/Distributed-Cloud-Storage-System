@@ -18,6 +18,32 @@
 
 using namespace std;
 
+
+struct BackendServerInfo {
+    string ip;
+    int tcpPort; // communication with frontend port
+    int udpPort; // heartbeat port
+    int udpPort2; // status message port
+    int tcpPort2; // enable disable port
+    bool isPrimary = false; // secondary by default
+    bool isDead = true; // dead by default
+    int replicaGroup;
+};
+
+struct FrontendServerInfo {
+    string ip;
+    int tcpPort; // communication with client
+    int udpPort; // heartbeat/admin port
+};
+
+typedef map<int, vector<BackendServerInfo>> BackendServerMap;
+BackendServerMap backend_servers;
+
+typedef map<int, FrontendServerInfo> FrontendServerMap;
+FrontendServerMap frontend_servers;
+
+
+
 int PORT = 7000;
 int UDPPORT = 7100;
 int DEBUG = 0;
@@ -50,10 +76,8 @@ int NEWDIR = 12;
 int UPLOAD = 13;
 
 int ADMIN = 20;
-int SERVER = 21;
-
-vector<string> frontend_servers = {"10000", "10001", "10002"};
-vector<string> backend_servers = {"11000", "11001", "11002"};
+int FRONTSERVER = 21;
+int BACKSERVER = 22;
 
 
 struct sockaddr_in destSock;
@@ -62,14 +86,96 @@ int udpsock;
 
 
 
-void send_msg(int port, string msg) {
+void parseBackendServers(const string& filename, BackendServerMap& servers) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "Error opening file" << endl;
+        return;
+    }
+
+    string line;
+    while (getline(file, line)) {
+        istringstream iss(line);
+        vector<string> parts;
+        string part;
+        while (getline(iss, part, ',')) {
+            size_t pos = part.find(':');
+            if (pos != string::npos) {
+                parts.push_back(part.substr(pos + 1));
+            } else {
+                cerr << "Invalid format in part: " << part << endl;
+            }
+        }
+
+        if (parts.size() != 6) {
+            cerr << "Invalid line format: " << line << endl;
+            // skip malformed lines
+            continue;
+        }
+
+        BackendServerInfo info;
+
+        info.replicaGroup = stoi(parts[0]);
+        info.ip = parts[1];
+        info.tcpPort = stoi(parts[2]);
+        info.udpPort = stoi(parts[3]);
+        info.udpPort2 = stoi(parts[4]);
+        info.tcpPort2 = stoi(parts[5]);
+
+        servers[info.replicaGroup].push_back(info);
+    }
+}
+
+
+void parseFrontendServers(const string& filename, FrontendServerMap& servers) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "Error opening file" << endl;
+        return;
+    }
+
+    string line;
+    int id = 1;
+    while (getline(file, line)) {
+        istringstream iss(line);
+        vector<string> parts;
+        string part;
+        while (getline(iss, part, ',')) {
+            size_t pos = part.find(':');
+            if (pos != string::npos) {
+                parts.push_back(part.substr(pos + 1));
+            } else {
+                cerr << "Invalid format in part: " << part << endl;
+            }
+        }
+
+        if (parts.size() != 3) {
+            cerr << "Invalid line format: " << line << endl;
+            // skip malformed lines
+            continue;
+        }
+
+        FrontendServerInfo info;
+
+        info.ip = parts[0];
+        info.tcpPort = stoi(parts[1]);
+        info.udpPort = stoi(parts[2]);
+
+        servers[id] = info;
+
+        id++;
+
+    }
+}
+
+void send_msg_udp(int port, string msg) {
 	memset((char *) &destSock, 0, sizeof(destSock));
 	destSock.sin_family = AF_INET;
 	destSock.sin_port = htons(port);
 	destSock.sin_addr.s_addr = inet_addr("127.0.0.1");
 
 	sendto(udpsock, msg.c_str(), strlen(msg.c_str()), 0,
-	      (struct sockaddr *)&destSock, sizeof(destSock));
+		  (struct sockaddr *)&destSock, sizeof(destSock));
 }
 
 
@@ -145,12 +251,10 @@ string renderAdminPage(string sid) {
 	content += "<h1>Server Control Panel</h1>\n";
 	content += "<ul>\n";
 
-	// Sample list of servers
-	std::vector<std::string> servers = {"Server1", "Server2", "Server3"};
-
 	content += "<h2>Frontend</h2>\n";
 	// Generate HTML list items with enable/disable forms for each server
-	for (const auto& server : frontend_servers) {
+	for (const auto& server_info : frontend_servers) {
+		string server = to_string(server_info.second.udpPort);
 		content += "<li>" + server + "\n";
 		// Enable button form
 		content += "<form action='http://localhost:"+ to_string(PORT) + "/" + server + "' method='post'>";
@@ -166,19 +270,28 @@ string renderAdminPage(string sid) {
 	}
 
 	content += "<h2>Backend</h2>\n";
-	for (const auto& server : backend_servers) {
-		content += "<li>" + server + "\n";
-		// Enable button form
-		content += "<form action='http://localhost:"+ to_string(PORT) + "/" + server + "' method='post'>";
-		content += "<input type='hidden' name='action' value='ENABLE'>";
-		content += "<input type='submit' value='Enable'>";
-		content += "</form>\n";
-		// Disable button form
-		content += "<form action='http://localhost:"+ to_string(PORT) + "/" + server + "' method='post'>";
-		content += "<input type='hidden' name='action' value='DISABLE'>";
-		content += "<input type='submit' value='Disable'>";
-		content += "</form>\n";
-		content += "</li>\n";
+	for (const auto& server_info : backend_servers) {
+		if (server_info.first == 0) {
+			content += "<h3>Master</h3>\n";
+		}
+		else {
+			content += "<h3>Replica " + to_string(server_info.first) + "</h3>\n";
+		}
+		for (const auto& replica_info : server_info.second) {
+			string server = to_string(replica_info.tcpPort2);
+			content += "<li>" + server + "\n";
+			// Enable button form
+			content += "<form action='http://localhost:"+ to_string(PORT) + "/" + server + "' method='post'>";
+			content += "<input type='hidden' name='action' value='ENABLE'>";
+			content += "<input type='submit' value='Enable'>";
+			content += "</form>\n";
+			// Disable button form
+			content += "<form action='http://localhost:"+ to_string(PORT) + "/" + server + "' method='post'>";
+			content += "<input type='hidden' name='action' value='DISABLE'>";
+			content += "<input type='submit' value='Disable'>";
+			content += "</form>\n";
+			content += "</li>\n";
+		}
 	}
 
 	content += "</ul>\n";
@@ -199,9 +312,12 @@ string generateReply(int reply_code, string username = "", string item = "", str
 	if (reply_code == ADMIN) {
 		return renderAdminPage(sid);
 	}
-	if (reply_code == SERVER) {
+	if (reply_code == FRONTSERVER) {
 		return renderAdminPage(sid);
 	}
+	if (reply_code == BACKSERVER) {
+			return renderAdminPage(sid);
+		}
 
     string reply = renderErrorPage(reply_code);
     return reply;
@@ -325,18 +441,18 @@ void *thread_worker(void *fd) {
 						}
 					}
 
-					else if (reply_code == SERVER) {
+					else if (reply_code == FRONTSERVER) {
 						send(sock, reply, strlen(reply), 0);
 						if (DEBUG) {
 							fprintf(stderr, "[%d] S: %s\n", sock, reply);
 						}
 
-						send_msg(server_port+10000, string(content+7));
+						send_msg_udp(server_port, string(content+7));
 						if (DEBUG) {
 							fprintf(stderr, "[%d] S: sent %s to port %d\n", sock, content+7, server_port);
 						}
 						if (string(content+7) == "ENABLE") {
-							string cmd = "./frontendserver -v -p " + to_string(server_port) + " &";
+							string cmd = "./frontendserver -v -p " + to_string(server_port-10000) + " &";
 							int cmd_status = system(cmd.c_str());
 							if (DEBUG) {
 								fprintf(stderr, "[%d] S: starting server on port %d\n", sock, server_port);
@@ -461,19 +577,21 @@ void *thread_worker(void *fd) {
 					char *url = strtok(NULL, " ");
 
 					// get server port
-					for (const auto &p : frontend_servers) {
-						if (string(url) == "/" + p) {
-							reply_code = SERVER;
-							server_port = stoi(p);
+					for (const auto &s : frontend_servers) {
+						if (string(url) == "/" + to_string(s.second.udpPort)) {
+							reply_code = FRONTSERVER;
+							server_port = s.second.udpPort;
 							break;
 						}
 					}
 
-					for (const auto &p : backend_servers) {
-						if (string(url) == "/" + p) {
-							reply_code = SERVER;
-							server_port = stoi(p);
-							break;
+					for (const auto &ss : backend_servers) {
+						for (const auto &s : ss.second) {
+							if (string(url) == "/" + to_string(s.tcpPort2)) {
+								reply_code = BACKSERVER;
+								server_port = s.tcpPort2;
+								break;
+							}
 						}
 					}
 
@@ -552,6 +670,16 @@ int main(int argc, char *argv[]) {
 
 		}
 	}
+
+	/////////////////
+	// Read Config //
+	/////////////////
+	string backend_config_path = "backendConfig.txt";
+	string frontend_config_path = "frontendConfig.txt";
+	parseBackendServers(backend_config_path, backend_servers);
+	parseFrontendServers(frontend_config_path, frontend_servers);
+
+
 	// Initialize client sockets
 	for(int i = 0; i < MAX_CLIENTS; i++) {
 		client_socks[i] = 0;
