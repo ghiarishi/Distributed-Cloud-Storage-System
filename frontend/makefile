@@ -28,5 +28,8 @@ frontendserver: frontendserver.cc
 loadbalancer: loadbalancer.cc
 	g++ $^ -lpthread -g -o $@
 
+admin: admin.cc
+	g++ $^ -lpthread -g -o $@
+
 clean::
 	rm -fv $(TARGETS) *~
