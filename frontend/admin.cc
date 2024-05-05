@@ -81,11 +81,65 @@ int UPLOAD = 13;
 int ADMIN = 20;
 int FRONTSERVER = 21;
 int BACKSERVER = 22;
+int STORAGE = 23;
+int VALUE = 24;
 
 
 struct sockaddr_in destSock;
 struct sockaddr_in localSock;
 int udpsock;
+
+
+
+string decodeURIComponent(const string& s) {
+    string result;
+    for (size_t i = 0; i < s.length(); ++i) {
+        if (s[i] == '%') {
+            int val;
+            istringstream is(s.substr(i + 1, 2));
+            if (is >> std::hex >> val) {
+                result += static_cast<char>(val);
+                i += 2;
+            }
+        } else if (s[i] == '+') {
+            result += ' ';
+        } else {
+            result += s[i];
+        }
+    }
+    return result;
+}
+
+
+map<string, string> parseQuery(const string& query) {
+    map<string, string> data;
+    istringstream paramStream(query);
+    string pair;
+
+    while (getline(paramStream, pair, '&')) {
+        size_t eq = pair.find('=');
+        string key = pair.substr(0, eq);
+        string value = pair.substr(eq + 1);
+        data[decodeURIComponent(key)] = decodeURIComponent(value);
+    }
+
+    return data;
+}
+
+vector<pair<string, string>> get_storage_content(int port) {
+	pair<string, string> p1 = make_pair("rowkey_1", "colkey_1");
+	pair<string, string> p2 = make_pair("rowkey_2", "colkey_2");
+	pair<string, string> p3 = make_pair("rowkey_3", "colkey_3");
+	vector<pair<string, string>> all_pairs({p1, p2, p3});
+
+	return all_pairs;
+}
+
+
+string get_value(int port, string rowkey, string colkey) {
+	return "Sample data value.";
+}
+
 
 
 string readFromBackendSocket(int backend_sock)
@@ -343,7 +397,7 @@ string renderErrorPage(int err_code) {
 	return reply;
 }
 
-// render the login webpage
+// render the admin webpage
 string renderAdminPage(string sid) {
 
 	string content = "";
@@ -398,6 +452,12 @@ string renderAdminPage(string sid) {
 			content += "<input type='submit' value='Disable'>";
 			content += "</form>\n";
 			content += "</li>\n";
+			// View button form
+			content += "<form action='http://localhost:"+ to_string(PORT) + "/" + server + "' method='post'>";
+			content += "<input type='hidden' name='action' value='VIEW'>";
+			content += "<input type='submit' value='View'>";
+			content += "</form>\n";
+			content += "</li>\n";
 		}
 	}
 
@@ -415,7 +475,97 @@ string renderAdminPage(string sid) {
 }
 
 
-string generateReply(int reply_code, string username = "", string item = "", string sid = "") {
+string renderStoragePage(string sid, int backend_port) {
+
+	vector<pair<string, string>> all_pairs = get_storage_content(backend_port);
+
+	string content = "";
+
+	content += "<!DOCTYPE html>\n";
+	content += "<html lang=\"en\">\n";
+	content += "<head>\n";
+	content += "    <meta charset=\"UTF-8\">\n";
+	content += "    <title>Key-Value Display</title>\n";
+	content += "    <style>\n";
+	content += "        body {\n";
+	content += "            font-family: Arial, sans-serif;\n";
+	content += "            margin: 20px;\n";
+	content += "        }\n";
+	content += "        .key-value {\n";
+	content += "            margin: 5px 0;\n";
+	content += "        }\n";
+	content += "        .button {\n";
+	content += "            padding: 5px 10px;\n";
+	content += "            margin-left: 10px;\n";
+	content += "            background-color: #007bff;\n";
+	content += "            color: white;\n";
+	content += "            border: none;\n";
+	content += "            cursor: pointer;\n";
+	content += "        }\n";
+	content += "    </style>\n";
+	content += "</head>\n";
+	content += "<body>\n";
+	content += "    <h1>Key-Value Display</h1>\n";
+	content += "    <div id=\"keyValueList\">\n";
+	for (const auto &p : all_pairs) {
+		content += "        <form action=\"/get-value\" method=\"POST\" class=\"key-value\">\n";
+		content += "            <input type=\"hidden\" name=\"key\" value=\"" + p.first + "\">\n";
+		content += "            <input type=\"hidden\" name=\"value\" value=\"" + p.second + "\">\n";
+		content += "            <strong>" + p.first + ":</strong> " + p.second + "\n";
+		content += "            <button type=\"submit\" class=\"button\" name=\"get-value\">Get-Value</button>\n";
+		content += "        </form>\n";
+	}
+
+	content += "    </div>\n";
+	content += "</body>\n";
+	content += "</html>\n";
+
+
+	string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "+ \
+					to_string(content.length()) + "\r\n" +\
+					"Set-Cookie: sid=" + sid + \
+					"\r\n\r\n";
+	string reply = header + content;
+
+	return reply;
+}
+
+string renderValuePage(string sid, int backend_port, string rowkey, string colkey) {
+
+	string data = get_value(backend_port, rowkey, colkey);
+
+	string content = "";
+
+    content += "<!DOCTYPE html>\n";
+    content += "<html lang=\"en\">\n";
+    content += "<head>\n";
+    content += "    <meta charset=\"UTF-8\">\n";
+    content += "    <title>Value Display</title>\n";
+    content += "    <style>\n";
+    content += "        body {\n";
+    content += "            font-family: Arial, sans-serif;\n";
+    content += "            margin: 20px;\n";
+    content += "        }\n";
+    content += "    </style>\n";
+    content += "</head>\n";
+    content += "<body>\n";
+    content += "    <h1>Value Display</h1>\n";
+    content += "    <p>" + data + "</p>\n";
+    content += "</body>\n";
+    content += "</html>\n";
+
+
+	string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "+ \
+					to_string(content.length()) + "\r\n" +\
+					"Set-Cookie: sid=" + sid + \
+					"\r\n\r\n";
+	string reply = header + content;
+
+	return reply;
+}
+
+
+string generateReply(int reply_code, int server_port, string rowkey, string colkey, string sid = "") {
 	if (reply_code == ADMIN) {
 		return renderAdminPage(sid);
 	}
@@ -423,8 +573,15 @@ string generateReply(int reply_code, string username = "", string item = "", str
 		return renderAdminPage(sid);
 	}
 	if (reply_code == BACKSERVER) {
-			return renderAdminPage(sid);
-		}
+		return renderAdminPage(sid);
+	}
+	if (reply_code == STORAGE) {
+		return renderStoragePage(sid, server_port);
+	}
+	if (reply_code == VALUE) {
+		return renderValuePage(sid, server_port, rowkey, colkey);
+	}
+
 
     string reply = renderErrorPage(reply_code);
     return reply;
@@ -488,6 +645,8 @@ void *thread_worker(void *fd) {
     int logged_in = 0;
     // email or file item name/identifier
     string item = "";
+	string rowkey = "";
+    string colkey = "";
 
     int server_port;
 
@@ -539,21 +698,12 @@ void *thread_worker(void *fd) {
 						fprintf(stderr, "\n");
 					}
 
-					string reply_string = generateReply(reply_code, username, item, sid);
-					const char *reply = reply_string.c_str();
 
-					if (reply_code == ADMIN) {
-						send(sock, reply, strlen(reply), 0);
-						if (DEBUG) {
-							fprintf(stderr, "[%d] S: %s\n", sock, reply);
-						}
+					if (string(content+7) == "VIEW") {
+						reply_code = STORAGE;
 					}
 
 					else if (reply_code == FRONTSERVER) {
-						send(sock, reply, strlen(reply), 0);
-						if (DEBUG) {
-							fprintf(stderr, "[%d] S: %s\n", sock, reply);
-						}
 
 						send_msg_udp(server_port, string(content+7));
 						if (DEBUG) {
@@ -568,6 +718,22 @@ void *thread_worker(void *fd) {
 							}
 						}
 					}
+
+
+					else if (reply_code == VALUE) {
+						map<string, string> msg_map = parseQuery(string(content));
+						rowkey = msg_map["key"];
+						colkey = msg_map["value"];
+					}
+
+					string reply_string = generateReply(reply_code, server_port, rowkey, colkey, sid);
+					const char *reply = reply_string.c_str();
+					send(sock, reply, strlen(reply), 0);
+					if (DEBUG) {
+						fprintf(stderr, "[%d] S: %s\n", sock, reply);
+					}
+
+
 
 					// clear the buffer
 					memmove(dataBuffer, dataBuffer + contentlen, dataBufferSize - contentlen + 1);
@@ -638,7 +804,7 @@ void *thread_worker(void *fd) {
                 		else {
 
                 			// send reply
-                			string reply_string = generateReply(reply_code, username, item, sid);
+                			string reply_string = generateReply(reply_code, server_port, rowkey, colkey, sid);
 							const char *reply = reply_string.c_str();
 
 							send(sock, reply, strlen(reply), 0);
@@ -703,6 +869,10 @@ void *thread_worker(void *fd) {
 						}
 					}
 
+					if (strcmp(url, "/get-value") == 0) {
+						reply_code = VALUE;
+					}
+
 					// page not found
 					//else {
 					//	reply_code = NOTFOUND;
@@ -746,7 +916,6 @@ void *thread_worker(void *fd) {
 			pthread_exit(NULL);
         }
     }
-
 
 }
 
