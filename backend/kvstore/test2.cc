@@ -29,7 +29,7 @@ int main() {
     }
 
     // Open the file
-    std::ifstream file1("/home/cis5050/sp24-cis5050-T18/backend/kvstore/test2.txt", ios::binary);
+    std::ifstream file1("test2.txt", ios::binary);
     if (!file1.is_open()) {
         std::cerr << "Failed to open file\n";
         return 1;
