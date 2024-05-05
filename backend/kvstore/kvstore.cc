@@ -786,10 +786,22 @@ void adminConsoleSignalHandler() {
                         for (const auto& row : table) {
                             for (const auto& column : row.second) {
                                 if (count >= skip && count < skip + 3) {
-                                    response += row.first + "," + column.first + "," + column.second + "\n";
+                                    response += row.first + "," + column.first + "\n";
                                 }
                                 count++;
                             }
+                        }
+                    } else if (temp == "GET ") {
+                        if (commands.size() == 3) {
+                            string row = commands[1];
+                            string col = commands[2];
+                            if (table.find(row) != table.end() && table[row].find(col) != table[row].end()) {
+                                response = "+OK " + table[row][col] + "\r\n";
+                            } else {
+                                response = "-ERR Not Found\r\n";
+                            }
+                        } else {
+                            response = "-ERR Invalid GET parameters\r\n";
                         }
                     } else {
                         response = "-ERR Invalid Command\r\n";
