@@ -120,7 +120,7 @@ long long sendStringOverSocket(int sock, const string& command) {
 }
 
 string readFromSocket(int sock, int expectNumberOfBytesToRead) {
-    const int bufferSize = 1024;
+    const int bufferSize = BUFFER_SIZE;
     char buffer[BUFFER_SIZE];
     string response;
 
@@ -160,7 +160,7 @@ string readAndWriteFromSocket(int sock, const string &command) {
 
 // Function to forward request to all secondary servers (only alive servers)
 bool forwardToAllSecondaryServers(string command) {
-    printDebug("Forwarding: " + command + " :to all secondary servers");
+    printDebug("Forwarding a command of size: " + to_string(command.size()) + " :to all secondary servers");
     
     auto& serverList = servers[myInfo.replicaGroup]; 
     
@@ -884,7 +884,7 @@ void* threadFunc(void* arg) {
             if (ch == '\r') {
                 // Assuming next char is '\n', check boundary
                 if (i + 1 < bytesRead && buffer[i + 1] == '\n') {
-                    printDebug("Command received: " + command);
+                    printDebug("Command received: " + to_string(command.size()));
 
                     vector<string> parameters = splitKVStoreCommand(command);
 

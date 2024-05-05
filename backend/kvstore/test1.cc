@@ -36,7 +36,7 @@ int main() {
     }
 
     // Use a buffer to read and send data
-    const size_t bufferSize = 4096;
+    const size_t bufferSize = BUFFER_SIZE;
     char buffer[bufferSize];
     long long count = 0;
 

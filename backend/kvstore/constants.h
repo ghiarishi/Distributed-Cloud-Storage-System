@@ -1,7 +1,7 @@
 #ifndef HEADER_H
 #define HEADER_H
 
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 8192
 #define CHECKPOINTING_THRESHOLD 3 // number of writes in checkpointing file after which we update the disk file and flush logs
 #define HEARTBEAT_INTERVAL 100 // heartbeat sent at this interval
 #define DEAD_THRESHOLD 300 // if no heartbeat for this long, server dead
