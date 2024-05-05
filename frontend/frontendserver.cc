@@ -89,6 +89,7 @@ int ADMIN = 14;
 int SIGNUP = 20;
 int NEWPASS = 21;
 
+
 /////////////////////////////////////
 //								   //
 //			 Heartbeat             //
@@ -398,14 +399,12 @@ vector<Node> getBackendNodes(string filename)
 
         // Construct Node object and push it to the vector
         nodes.emplace_back(id, ip, tcp, udp, udp2, line);
-
         printf("The whole line is %s\n", line.c_str());
     }
 
     file.close();
     return nodes;
 }
-
 // Parse login data
 tuple<string, string> parseLoginData(string data_str)
 {
