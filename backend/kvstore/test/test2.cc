@@ -4,7 +4,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include "constants.h"
+#include "../constants.h"
 
 using namespace std;
 
@@ -29,8 +29,8 @@ int main() {
     }
 
     // Open the file
-    std::ifstream file1("test2.txt", ios::binary);
-    // std::ifstream file1("test5.txt", ios::binary);
+    // std::ifstream file1("test2.txt", ios::binary);
+    std::ifstream file1("100b.txt", ios::binary);
 
     if (!file1.is_open()) {
         std::cerr << "Failed to open file\n";
