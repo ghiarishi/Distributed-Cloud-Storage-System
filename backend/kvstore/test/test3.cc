@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include "constants.h"
 
 using namespace std;
 
@@ -18,7 +19,7 @@ int main() {
     // Server address
     struct sockaddr_in server;
     server.sin_family = AF_INET;
-    server.sin_port = htons(2001);
+    server.sin_port = htons(2003);
     server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     // Connect to the server
@@ -28,14 +29,16 @@ int main() {
     }
 
     // Open the file
-    std::ifstream file1("/home/cis5050/sp24-cis5050-T18/backend/kvstore/test1.txt", ios::binary);
+    std::ifstream file1("test3.txt", ios::binary);
+    // std::ifstream file1("test6.txt", ios::binary);
+
     if (!file1.is_open()) {
         std::cerr << "Failed to open file\n";
         return 1;
     }
 
     // Use a buffer to read and send data
-    const size_t bufferSize = 4096;
+    const size_t bufferSize = BUFFER_SIZE;
     char buffer[bufferSize];
     long long count = 0;
 
@@ -46,14 +49,13 @@ int main() {
             break;
         }
         count += bytesToSend;
-        usleep(10000); // Slightly longer sleep to avoid overloading network for large sends
+        // usleep(10000); // Slightly longer sleep to avoid overloading network for large sends
     }
 
     write(sock,"\r\n",2);
 
     file1.close();
-
-    ssize_t bytesRead;
+    size_t bytesRead;
     char buffer1[bufferSize];
     string response;
 
@@ -71,4 +73,6 @@ int main() {
     } else {
         return 1;
     }
+
+    return 0;
 }

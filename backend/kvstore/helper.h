@@ -1,3 +1,4 @@
+#include "constants.h"
 #include <unistd.h>
 #include <iostream>
 #include <fstream>
@@ -13,11 +14,10 @@
 #include <arpa/inet.h>
 #include <unordered_map>
 
-#define BUFFER_SIZE 4096
-
 using namespace std;
 
-// Define the key-value store
+
+// define the key-value store as a map of maps
 unordered_map<string, unordered_map<string, string>> table;
 vector<int> openConnections;
 
@@ -27,11 +27,12 @@ int replicaGroup = 0;
 
 struct ServerInfo {
     string ip;
-    int tcpPort;
-    int udpPort;
-    int udpPort2;
-    bool isPrimary = false; // default false
-    bool isDead = true;
+    int tcpPort; // communication with frontend port
+    int udpPort; // heartbeat port
+    int udpPort2; // status message port
+    int tcpPort2; // enable disable port
+    bool isPrimary = false; // secondary by default
+    bool isDead = true; // dead by default
     int replicaGroup;
 };
 
@@ -63,18 +64,20 @@ void parseArguments(int argc, char *argv[]) {
 }
 
 void printDebug(string debugLog) {
-    cerr << debugLog << endl;
+    if (debug){
+        cerr << debugLog << endl;
+    }
 }
 
-// Function to truncate fileName given as parameter/argument
+// function to truncate fileName given as parameter/argument
 void truncateFile(string fileName) {
     ofstream file(fileName, ofstream::out | ofstream::trunc);
     file.close();
 }
 
-// Function to write to disk file from the in-memory table
+// function to write to disk file from the in-memory table
 void checkpoint_table(const string& diskFile) {
-    string temp_filename = diskFile + ".tmp"; // Temporary filename
+    string temp_filename = diskFile + ".tmp"; // temporary filename
 
     ofstream tempFile(temp_filename);
 
@@ -92,7 +95,7 @@ void checkpoint_table(const string& diskFile) {
         }
         tempFile.close();
 
-        // Rename on success
+        // rename on success
         remove(diskFile.c_str());
         rename(temp_filename.c_str(), diskFile.c_str());
         truncateFile(diskFile + "-checkpoint"); 
@@ -101,7 +104,7 @@ void checkpoint_table(const string& diskFile) {
     }
 }
 
-// Function to append to filePath - the line to append is also given as a parameter
+// function to append to filePath - the line to append is also given as a parameter
 void appendToFile(string filePath, string lineToAppend) {
     ofstream file(filePath, ios::app);
     if (file.is_open()) {
@@ -112,7 +115,7 @@ void appendToFile(string filePath, string lineToAppend) {
     }
 }
 
-// Helper function to extract the value after a colon in a config string
+// helper function to extract the value after a colon in a config string
 string extractValue(const string& data) {
     auto pos = data.find(':');
     if (pos != string::npos && pos + 1 < data.size()) {
@@ -121,7 +124,7 @@ string extractValue(const string& data) {
     return "";
 }
 
-
+// go through config.txt file and extract server data
 void parseServers(const string& filename, ServerMap& servers) {
     ifstream file(filename);
     if (!file.is_open()) {
@@ -143,9 +146,10 @@ void parseServers(const string& filename, ServerMap& servers) {
             }
         }
 
-        if (parts.size() != 5) {
+        if (parts.size() != 6) {
             cerr << "Invalid line format: " << line << endl;
-            continue;  // Skip malformed lines
+            // skip malformed lines
+            continue;  
         }
 
         ServerInfo info;
@@ -155,8 +159,8 @@ void parseServers(const string& filename, ServerMap& servers) {
         info.tcpPort = stoi(parts[2]);
         info.udpPort = stoi(parts[3]);
         info.udpPort2 = stoi(parts[4]);
+        info.tcpPort2 = stoi(parts[5]);
 
         servers[info.replicaGroup].push_back(info);
-
     }
 }

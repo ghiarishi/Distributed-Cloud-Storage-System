@@ -11,13 +11,152 @@
 #include <iomanip>
 #include <mutex>
 #include <ctime>
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
 
 using namespace std;
 
-map<int, ServerInfo> primaryServers;
-unordered_map<string, chrono::steady_clock::time_point> last_heartbeat; // repID:tcpPort mapped to time
+string configFilePath = "config.txt";
+map<int, ServerInfo> primaryServers; // replica group numbers mapped to the primary server info for that group
+unordered_map<int, int> nextServerRoundRobin; // which server to send to frontend next for each repica group
+unordered_map<string, chrono::steady_clock::time_point> last_heartbeat; // most recent time of heartbeat for each repID:tcpPort 
 mutex heartbeat_mutex;
 
+// Function to handle incoming TCP connections from frontend servers
+void handleIncomingRequests() {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket: " << strerror(errno) << endl;
+        return;
+    }
+
+    // ensure socket closes, and new socket can be opened
+    int option = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR|SO_REUSEPORT, &option, sizeof(option)) < 0){
+        fprintf(stderr, "Failed to setsockopt: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+    servaddr.sin_port = htons(myInfo.tcpPort);
+
+    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        cerr << "Bind failed: " << strerror(errno) << endl;
+        close(sockfd);
+        return;
+    }
+
+    listen(sockfd, 5);
+
+    while (true) {  // main accept() loop
+        int conFD = accept(sockfd, NULL, NULL);
+        if (conFD < 0) {
+            cerr << "Error on accept: " << strerror(errno) << endl;
+            continue;
+        }
+
+        char buffer[BUFFER_SIZE];
+        string command;
+        int bytesRead;
+
+        bytesRead = read(conFD, buffer, sizeof(buffer));
+        if (bytesRead < 0) {
+            cerr << "Failed to read: " << strerror(errno) << endl;
+        } else if (bytesRead == 0) {
+            // connection closed by client
+            printDebug("Connection closed by client");
+        } else {
+            for (int i = 0; i < bytesRead; ++i) {
+                char ch = buffer[i];
+                    
+                // command is complete
+                if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
+                    printDebug("[handleIncomingRequests] Command received from frontend: " + command);
+                    string temp = command;
+                    for (char &c : temp) {
+                        c = toupper(c);
+                    }
+
+                    if (temp.substr(0,11) == "GET_SERVER:") {
+                        string username = command.substr(11);
+                        
+                        int replicaGroup;
+
+                        // assign the replica group based on first character of the username
+                        char firstChar = tolower(username[0]);
+
+                        if (firstChar >= 'a' && firstChar <= 'i') {
+                            replicaGroup = 1;
+                        } else if (firstChar >= 'j' && firstChar <= 'r') {
+                            replicaGroup = 2;
+                        }  else if ((firstChar >= 's' && firstChar <= 'z') || (firstChar >= '0' && firstChar <= '9')) {
+                            replicaGroup = 3;
+                        } 
+                      
+                        printDebug("[handleIncomingRequests] Replica group assigned: " + replicaGroup);
+
+                        // initialize a flag to indicate if a live server was found
+                        bool liveServerFound = false;
+                        string response;
+
+                        // get the starting index for round-robin to ensure all servers are checked
+
+                        int startServerIndex = nextServerRoundRobin[replicaGroup];
+                        int currentServerIndex = startServerIndex;
+                        int numServers = servers[replicaGroup].size();
+
+                        // loop through all the servers in the replica group, until a live server is founds
+                        do {
+                            ServerInfo selectedServer = servers[replicaGroup][currentServerIndex];
+
+                            // check if the current server is alive
+                            if (!selectedServer.isDead) {
+                                response = "SERVER_INFO:" + selectedServer.ip + ":" + to_string(selectedServer.tcpPort) + "\r\n";
+                                
+                                // increment index to the next server for future requests
+                                nextServerRoundRobin[replicaGroup] = (currentServerIndex + 1) % numServers;
+                                liveServerFound = true;
+                                break; 
+                            }
+
+                            // move to the next server in the round-robin
+                            currentServerIndex = (currentServerIndex + 1) % numServers;
+                        } while (currentServerIndex != startServerIndex);
+
+                        // if no live servers were found
+
+                        if (!liveServerFound) {
+                            response = "-ERR NO_SERVERS_ALIVE\r\n";
+                        }
+
+                        printDebug("[handleIncomingRequests] Replied to frontend: " + response);
+
+                        // send the response to the frontend
+                        write(conFD, response.c_str(), response.length());
+                    }
+                    command.clear();
+                    
+                    // skip \n
+                    i++;
+                } else {
+                    command += ch;
+                }
+            }
+        }
+
+        // close the connection to the frontend server
+        close(conFD);  
+    }
+
+    close(sockfd);
+}
+
+// function to send the primary/secondary status to the replica servers
+// also share information about a server that has died to those in its replica group
 void sendIsPrimary(bool isPrimary, ServerInfo recvInfo, ServerInfo primaryInfo, ServerInfo deadInfo) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -43,10 +182,12 @@ void sendIsPrimary(bool isPrimary, ServerInfo recvInfo, ServerInfo primaryInfo, 
     if (deadInfo.isDead) {
         message += ";" + deadInfo.ip + ":" + to_string(deadInfo.tcpPort);
     }
+    
     message.push_back('\0');
+    
+    printDebug("[sendIsPrimary] Status message: " + message + " | Dead Server: " + to_string(deadInfo.isDead));
 
-    int send_status = sendto(sockfd, message.c_str(), message.length(), 0,
-                             (struct sockaddr*)&servaddr, sizeof(servaddr));
+    int send_status = sendto(sockfd, message.c_str(), message.length(), 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
     if (send_status < 0) {
         cerr << "Error sending server status" << endl;
     }
@@ -54,6 +195,7 @@ void sendIsPrimary(bool isPrimary, ServerInfo recvInfo, ServerInfo primaryInfo, 
     close(sockfd);
 }
 
+// function to send information about new secondary server to the primary server
 void sendNewSecondaryInfoToPrimary(ServerInfo primaryInfo, ServerInfo secondaryInfo) {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -72,6 +214,8 @@ void sendNewSecondaryInfoToPrimary(ServerInfo primaryInfo, ServerInfo secondaryI
 
     message.push_back('\0');
 
+    printDebug("[sendNewSecondaryInfoToPrimary] Status message: " + message + " | Dead Server: ");
+
     int send_status = sendto(sockfd, message.c_str(), message.length(), 0,
                              (struct sockaddr*)&servaddr, sizeof(servaddr));
     if (send_status < 0) {
@@ -81,15 +225,15 @@ void sendNewSecondaryInfoToPrimary(ServerInfo primaryInfo, ServerInfo secondaryI
     close(sockfd);
 }
 
-void check_heartbeats() {
+void checkHeartbeats() {
     while (true) {
-        this_thread::sleep_for(chrono::seconds(1)); // Check every second
+        this_thread::sleep_for(chrono::milliseconds(HEARTBEAT_INTERVAL)); // Check every second
         auto now = chrono::steady_clock::now();
 
         lock_guard<mutex> lock(heartbeat_mutex);
         for (auto it = last_heartbeat.begin(); it != last_heartbeat.end(); ) {
             // server is dead
-            if (chrono::duration_cast<chrono::seconds>(now - it->second).count() > DEAD_THRESHOLD) {
+            if (chrono::duration_cast<chrono::milliseconds>(now - it->second).count() > DEAD_THRESHOLD) {
                 string key = it->first;
                 
                 // repID;ip:port
@@ -103,8 +247,8 @@ void check_heartbeats() {
                 auto& serverList = servers[deadRepID]; // Reference to the vector of servers in the specified group
 
                 ServerInfo deadServerInfo;
-
-                cout << "Server " << to_string(deadTCP) << " is dead." << endl;
+                
+                printDebug("[checkHeartbeats] Server: " + deadIP + ":" + to_string(deadTCP) + " is dead. Primary: " + to_string(deadServerInfo.isPrimary));
 
                 // iterate through all servers of the group, and remove the dead server    
                 for (auto it = serverList.begin(); it != serverList.end(); ++it) {
@@ -117,34 +261,33 @@ void check_heartbeats() {
                         }
 
                         it->isPrimary = false;
-                        cout<<"Server marked dead"<<endl;
+                        
+                        printDebug("[checkHeartbeats] Server: " + deadIP + ":" + to_string(deadTCP) + " marked as dead.");
                     } 
                 }
 
                 if (deadServerInfo.isPrimary){ // if the server that died was a primary server
                     // assign a new primary
-                    cout<<"Primary Server Dead"<<endl;
-
                     bool primaryAssigned = false;
                     // iterate through all the severs in the group               
                     for (auto it = serverList.begin(); it != serverList.end(); ++it) {
                         // if primary assigned already, just inform this server about it
                         if (primaryAssigned){
-                            // inform of new primary
-                            cout << "Informing sec of primary death" << endl;
+                            // if a primary has been assigned, inform the secondary server about it
+                            printDebug("[checkHeartbeats] Inform " + it->ip + ":" + to_string(it->tcpPort) + " that primary is dead.");
                             sendIsPrimary(false, *it, primaryServers[it->replicaGroup], deadServerInfo);
                         } else if (!it->isDead) {
-                            // if no primary, assign it, and inform it
-                            cout << "Server " << it->tcpPort << " is the new primary in group "<< to_string(it->replicaGroup) <<endl;
+                            // if no primary server has been assigned so far, assign the current one to it
+                            printDebug("[checkHeartbeats] Server: " + it->ip + ":" + to_string(it->tcpPort) + " assigned as Primary Server in group " + to_string(it->replicaGroup));
+
                             it->isPrimary = true;
                             primaryServers[deadServerInfo.replicaGroup] = *it;
                             primaryAssigned = true;
+
                             sendIsPrimary(true, *it, primaryServers[it->replicaGroup], deadServerInfo);
                         }
                     }
                 } else { // if secondary server dies
-                    cout<<"Secondary Server Dead"<<endl;
-
                     // inform all other servers in this replica group about the death
                     for (auto it = serverList.begin(); it != serverList.end(); ++it) {
                         if (!it->isDead) {
@@ -152,7 +295,6 @@ void check_heartbeats() {
                         }
                     }
                 }
-
                 it = last_heartbeat.erase(it);
             } else {
                 ++it;   
@@ -161,6 +303,154 @@ void check_heartbeats() {
     }
 }
 
+string base64Encode(const vector<char>& data) {
+    // Create a BIO object for base64 encoding
+    BIO* bio = BIO_new(BIO_s_mem());
+    BIO* base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Write data to BIO
+    BIO_write(bio, data.data(), data.size());
+    BIO_flush(bio);
+
+    // Get the encoded data
+    BUF_MEM* bio_buf;
+    BIO_get_mem_ptr(bio, &bio_buf);
+
+    // Convert the encoded data to a string
+    string encoded_data(bio_buf->data, bio_buf->length);
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return encoded_data;
+}
+
+// function to send config file to admin console
+void sendToAdminConsole(int conFD){
+    // Open the file in binary mode
+    ifstream file(configFilePath, ios::binary);
+    if (!file) {
+        cerr << "Cannot open file: " << configFilePath << endl;
+        return;
+    }
+    
+    // Read the file into a vector
+    vector<char> file_contents((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+
+    // Encode the file contents
+    string encoded_string = base64Encode(file_contents);
+
+    size_t dataLength = encoded_string.size();
+
+
+    for (size_t offset = 0; offset < dataLength; offset += BUFFER_SIZE) {
+        // Calculate the number of bytes to send
+        int bytesToSend = std::min(BUFFER_SIZE, static_cast<int>(dataLength - offset));
+        
+        // Send the data in chunks of BUFFER_SIZE
+        if (write(conFD, encoded_string.c_str() + offset, bytesToSend) != bytesToSend) {
+            std::cerr << "Send failed\n";
+            break;
+        }
+    }
+
+    // Send a newline at the end of the transmission
+    write(conFD, "\r\n", 2);
+
+    printDebug("Config file sent to Admin Console");
+
+}
+
+void receiveAdminConsoleRequest(){
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        cerr << "Error opening socket: " << strerror(errno) << endl;
+        return;
+    }
+
+    // ensure socket closes, and new socket can be opened
+    int option = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR|SO_REUSEPORT, &option, sizeof(option)) < 0){
+        fprintf(stderr, "Failed to setsockopt: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+    servaddr.sin_port = htons(myInfo.tcpPort2);
+
+    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        cerr << "Bind failed: " << strerror(errno) << endl;
+        close(sockfd);
+        return;
+    }
+
+    listen(sockfd, 5);
+
+    while (true) {  // main accept() loop
+        int conFD = accept(sockfd, NULL, NULL);
+        if (conFD < 0) {
+            cerr << "Error on accept: " << strerror(errno) << endl;
+            continue;
+        }
+
+        char buffer[BUFFER_SIZE];
+        string command;
+        int bytesRead;
+
+        bytesRead = read(conFD, buffer, sizeof(buffer));
+        if (bytesRead < 0) {
+            cerr << "Failed to read: " << strerror(errno) << endl;
+        } else if (bytesRead == 0) {
+            // connection closed by client
+            printDebug("Connection closed by admin");
+        } else {
+            for (int i = 0; i < bytesRead; ++i) {
+                char ch = buffer[i];
+                    
+                // command is complete
+                if (ch == '\r' && i + 1 < bytesRead && buffer[i + 1] == '\n') {
+                    printDebug("[adminConsoleSignalHandler] Command received from admin: " + command);
+                    
+                    string temp = command;
+                    for (char &c : temp) {
+                        c = std::toupper(c);
+                    }
+
+                    string response;
+
+                    if (temp == "REQUEST") {
+                        sendToAdminConsole(conFD);
+
+                    } else {
+                        response = "-ERR Invalid Command\r\n";
+                    }
+
+                    printDebug("[adminConsoleSignalHandler] Replied to admin console: " + response);
+
+                    // send the response to the admin console
+                    write(conFD, response.c_str(), response.length());
+
+                    command.clear();
+                    
+                    // skip \n
+                    i++;
+                } else {
+                    command += ch;
+                }
+            }
+        }
+        // close the connection to the frontend server
+        close(conFD);  
+    }
+    close(sockfd);
+}
+
+// function to receive heartbeats from servers to ensure they are alive
 void recvHeartbeat() {
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -180,7 +470,8 @@ void recvHeartbeat() {
         return;
     }
 
-    thread heartbeat_checker(check_heartbeats);
+    // start the thread to check for heartbeats
+    thread heartbeat_checker(checkHeartbeats);
     heartbeat_checker.detach();
     
     while (true) {
@@ -205,35 +496,35 @@ void recvHeartbeat() {
             int replicaGroup = stoi(message.substr(0, first_comma_pos));
             int senderTCP = stoi(message.substr(first_comma_pos+1, second_comma_pos-1));
 
-            // vector<ServerInfo> temp = ;
             ServerInfo tempInfo;
-            // if no existing primary server, then 
+
             for (auto& info : servers[replicaGroup]) {
                 if (info.tcpPort == senderTCP) {
                     tempInfo = info;
                     
-                    // if server already alive, don't bother
+                    // if server already alive, don't go through the rest of the code
                     if (!info.isDead){
                         continue;
                     }
 
                     // if server newly alive, or revived, then do this
-
                     info.isDead = false;
 
                     // assign the first connecting node of rep grp as primary
                     if (primaryServers.find(replicaGroup) == primaryServers.end()){
                         info.isPrimary = true;
                         primaryServers[replicaGroup] = info;
-                        cout<<to_string(senderTCP)<<" assigned as PRIMARY in group "<<to_string(replicaGroup)<<endl;
+                        printDebug(info.ip + ":" + to_string(senderTCP) + "assigned as primary in group " + to_string(replicaGroup));
                     } 
 
                     ServerInfo deadInfo;
                     deadInfo.isDead = false;
+
+                    // inform the server of its new status
                     sendIsPrimary(info.isPrimary, info, primaryServers[info.replicaGroup], deadInfo);
 
                     if(!info.isPrimary){
-                        // send to primary saying I AM SECONDARY NEW
+                        // if secondary server, let the primary know its a new server alive
                         sendNewSecondaryInfoToPrimary(primaryServers[info.replicaGroup], info);
                     }
                 }
@@ -243,29 +534,41 @@ void recvHeartbeat() {
             string key = to_string(tempInfo.replicaGroup) + ";" + tempInfo.ip + ":" + to_string(tempInfo.tcpPort);
             last_heartbeat[key] = chrono::steady_clock::now();
 
-            time_t currentTime = time(nullptr); // for printing purposes
+            // time_t currentTime = time(nullptr); 
             // cout << message << " at " << ctime(&currentTime);
         }
     }
-
     close(sockfd);
 }
 
-int main(){
-    parseServers("config.txt", servers);
+int main(int argc, char *argv[]){
 
-    // Displaying the parsed data
+    parseArguments(argc, argv);
+    parseServers(configFilePath, servers);
+        
+    // Initialize round-robin index to 0 for each replica group
+    for (const auto& pair : servers) {
+        nextServerRoundRobin[pair.first] = 0;  
+    }
+
+    // find the master servers info
     for (const auto& server : servers) {
         for (const auto& info : server.second) {
             if (server.first == 0) {
                 myInfo = info;
             }
-            // cout << "  IP: " << info.ip << ", TCP Port: " << info.tcpPort << ", UDP Port: " << info.udpPort << endl;
         }
     }
 
+    // listen for frontend requests
+    thread requestHandlerHelper(handleIncomingRequests);
+    requestHandlerHelper.detach();
+
+    thread adminRequestHandlerThread(receiveAdminConsoleRequest);
+    adminRequestHandlerThread.detach();
+
     // listen for heartbeats
     recvHeartbeat();
- 
+
     return 0;
 }
