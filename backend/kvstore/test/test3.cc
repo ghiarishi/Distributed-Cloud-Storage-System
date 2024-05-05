@@ -30,6 +30,8 @@ int main() {
 
     // Open the file
     std::ifstream file1("test3.txt", ios::binary);
+    // std::ifstream file1("test6.txt", ios::binary);
+
     if (!file1.is_open()) {
         std::cerr << "Failed to open file\n";
         return 1;
