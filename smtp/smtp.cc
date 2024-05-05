@@ -53,72 +53,72 @@ string directory;
 int *clientSocketFd;
 pthread_t mainThreadId;
 
-
 bool sendToBackendSocket(int backend_sock, string command)
 {
-    if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
-    {
-        cerr << "Error sending data to backend server" << std::endl;
-        return false;
-    }
-    return true;
+  if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
+  {
+    cerr << "Error sending data to backend server" << std::endl;
+    return false;
+  }
+  return true;
 }
 
 // Helper function to read from backend socket
 string readFromBackendSocket(int backend_sock)
 {
-    string response;
-    char buffer[4096];
+  string response;
+  char buffer[4096];
 
-    while (true)
+  while (true)
+  {
+    memset(buffer, 0, sizeof(buffer));
+
+    int bytesReceived = recv(backend_sock, buffer, sizeof(buffer), 0);
+    if (bytesReceived < 0)
     {
-        memset(buffer, 0, sizeof(buffer));
-
-        int bytesReceived = recv(backend_sock, buffer, sizeof(buffer), 0);
-        if (bytesReceived < 0)
-        {
-            cerr << "Error receiving response from server" << std::endl;
-            return "";
-        }
-        printf("the buffer is %s\n", buffer);
-
-        response.append(buffer, bytesReceived);
-
-        // Check if "\r\n" is present in the received data
-        size_t found = response.find("\r\n");
-        if (found != std::string::npos)
-        {
-            break; // Exit loop if "\r\n" is found
-        }
+      cerr << "Error receiving response from server" << std::endl;
+      return "";
     }
+    printf("the buffer is %s\n", buffer);
 
-    return response;
+    response.append(buffer, bytesReceived);
+
+    // Check if "\r\n" is present in the received data
+    size_t found = response.find("\r\n");
+    if (found != std::string::npos)
+    {
+      break; // Exit loop if "\r\n" is found
+    }
+  }
+
+  return response;
 }
 
-string base64Encode(const std::string& input) {
-    BIO *bio, *b64;
-    BUF_MEM *bufferPtr;
+string base64Encode(const std::string &input)
+{
+  BIO *bio, *b64;
+  BUF_MEM *bufferPtr;
 
-    // Create a Base64 filter/sink
-    b64 = BIO_new(BIO_f_base64());
-    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+  // Create a Base64 filter/sink
+  b64 = BIO_new(BIO_f_base64());
+  BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
 
-    // Create a memory buffer source
-    bio = BIO_new(BIO_s_mem());
-    bio = BIO_push(b64, bio);
+  // Create a memory buffer source
+  bio = BIO_new(BIO_s_mem());
+  bio = BIO_push(b64, bio);
 
-    // Write input data to the Base64 sink
-    BIO_write(bio, input.c_str(), static_cast<int>(input.length()));
-    BIO_flush(bio);
+  // Write input data to the Base64 sink
+  BIO_write(bio, input.c_str(), static_cast<int>(input.length()));
+  BIO_flush(bio);
 
-    // Retrieve the result
-    BIO_get_mem_ptr(bio, &bufferPtr);
-    std::string result(bufferPtr->data, bufferPtr->length);
+  // Retrieve the result
+  BIO_get_mem_ptr(bio, &bufferPtr);
+  std::string result(bufferPtr->data, bufferPtr->length);
 
-    // Clean up
-    BIO_free_all(bio);
+  // Clean up
+  BIO_free_all(bio);
 
-    return result;
+  return result;
 }
 
 pair<string, int> extractIPAndPort(const string &serverInfo)
@@ -510,11 +510,10 @@ void *handle_connection(void *arg)
               //   sendResponse(client_socket, "250 OK : Receiver ok\r\n");
               //   state = SMTPState::RcptToReceived;
               // }
-              // Even if user dosen't exist thats ok 
+              // Even if user dosen't exist thats ok
               rcptTo.insert(email.substr(0, email.find('@')));
               sendResponse(client_socket, "250 OK : Receiver ok\r\n");
               state = SMTPState::RcptToReceived;
-
             }
             else if (relay)
             {
@@ -640,13 +639,14 @@ void *handle_connection(void *arg)
                 // given the email we need to get the username
                 string username = recipient_email.substr(0, recipient_email.find('@'));
                 int backend_socket_curr = connectToBackend(username);
-                // now that we have the backend socket we want to PUT the email in there 
-                //a,/emails/d/1714684198,content
-                string encodedEmail = base64Encode(date_str + email_content);
-                string command = "PUT " + username + ",/emails/" + mailFrom + "," + encodedEmail + "\r\n";
-                sendToBackendSocket(backend_socket_curr , command);
+                // now that we have the backend socket we want to PUT the email in there
+                // a,/emails/d/1714684198,content
+                string encodedEmail = base64Encode(email_content);
+                string encodedTime = base64Encode(date_str);
+                string command = "PUT " + username + ",/emails/" + mailFrom + "/" + encodedTime + "," + encodedEmail + "\r\n";
+                sendToBackendSocket(backend_socket_curr, command);
                 string response = readFromBackendSocket(backend_socket_curr);
-                printf("response is %s\n",response.c_str());
+                printf("response is %s\n", response.c_str());
                 // Project Code ------
                 // Release the lock
                 // flock(fd, LOCK_UN);
@@ -689,6 +689,11 @@ void *handle_connection(void *arg)
                   pthread_mutex_unlock(&mailboxMutexes[directory + "mqueue"]);
                   flock(fd, LOCK_UN);
                   fclose(mqueueFile);
+
+                  // project code ---------------------------
+                  const char *command = "./smtpec mailtest";
+                  int result = system(command);
+                  // project code ---------------------------
                   success = true;
                 }
               }
@@ -909,5 +914,3 @@ int main(int argc, char *argv[])
   cleanup(mainThreadId);
   return 0;
 }
-
-

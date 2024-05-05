@@ -1,32 +1,15 @@
-# Compiler
-#CC = g++
-
-# Compiler flags
-#CFLAGS = -std=c++11 -pthread
-
-# Executable name
-#TARGET = frontendserver
-
-# Source files
-#SRCS = frontendserver.cc
-
-# Rule to build the executable
-#$(TARGET): $(SRCS)
-#	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET)
-
-# Clean rule
-#clean:
-#	rm -f $(TARGET)
-
-TARGETS = frontendserver loadbalancer
+TARGETS = frontendserver loadbalancer admin
 
 all: $(TARGETS)
 
-frontendserver: frontendserver.cc
+frontendserver: frontendserver.cc $(OBJECTS)
 	g++ $^ -lpthread -g -lssl -lcrypto -o $@
 
-loadbalancer: loadbalancer.cc
+loadbalancer: loadbalancer.cc $(OBJECTS)
+	g++ $^ -lpthread -g -lssl -lcrypto -o $@
+
+admin: admin.cc $(OBJECTS)
 	g++ $^ -lpthread -g -lssl -lcrypto -o $@
 
 clean::
-	rm -fv $(TARGETS) *~
+	rm -fv $(TARGETS) $(OBJECTS) *~
