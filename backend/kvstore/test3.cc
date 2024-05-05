@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include "constants.h"
 
 using namespace std;
 
@@ -52,8 +53,24 @@ int main() {
     write(sock,"\r\n",2);
 
     file1.close();
-    // close(sock);
-    sleep(30);
+    size_t bytesRead;
+    char buffer1[bufferSize];
+    string response;
+
+    while (bytesRead < 5) {
+        bytesRead += read(sock, buffer1, bufferSize);
+        // Append the read data to the response string
+        cout << "Bytes Read -> " << bytesRead << endl;
+        response.append(buffer1, bytesRead);
+        cout << "Response read from socket so far ->" << response << endl;
+    }
+
+    // Check if the response contains "OK"
+    if (response.find("+OK") != std::string::npos) {
+        return 0;
+    } else {
+        return 1;
+    }
 
     return 0;
 }

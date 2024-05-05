@@ -462,7 +462,7 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 }
             }
         }
-        msg = keys;
+        msg = keys.size() > 0 ? keys + "\r\n" : "-ERR Nothing Found\r\n";
     } else {
         msg = "-ERR Unknown command\r\n";
     }
