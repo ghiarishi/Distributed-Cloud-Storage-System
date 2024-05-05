@@ -15,6 +15,9 @@
 #include <fstream>
 #include <vector>
 #include <algorithm>
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
 
 using namespace std;
 
@@ -85,46 +88,150 @@ struct sockaddr_in localSock;
 int udpsock;
 
 
+string readFromBackendSocket(int backend_sock)
+{
+    string response;
+    char buffer[4096];
 
-void parseBackendServers(const string& filename, BackendServerMap& servers) {
-    ifstream file(filename);
-    if (!file.is_open()) {
-        cerr << "Error opening file" << endl;
-        return;
+    while (true)
+    {
+        memset(buffer, 0, sizeof(buffer));
+
+        int bytesReceived = recv(backend_sock, buffer, sizeof(buffer), 0);
+        if (bytesReceived < 0)
+        {
+            cerr << "Error receiving response from server" << std::endl;
+            return "";
+        }
+        printf("the buffer is %s\n", buffer);
+
+        response.append(buffer, bytesReceived);
+
+        // Check if "\r\n" is present in the received data
+        size_t found = response.find("\r\n");
+        if (found != std::string::npos)
+        {
+            break; // Exit loop if "\r\n" is found
+        }
     }
 
-    string line;
-    while (getline(file, line)) {
-        istringstream iss(line);
-        vector<string> parts;
-        string part;
-        while (getline(iss, part, ',')) {
+    return response;
+}
+
+int connectToMaster()
+{
+    int master_sock;
+    struct sockaddr_in server_addr;
+
+    // Open master socket
+    if ((master_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        std::cerr << "Error creating socket" << std::endl;
+        return -1;
+    }
+
+    // Server address
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(3000);
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    // Connect to server
+    if (connect(master_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        std::cerr << "Error connecting to server" << std::endl;
+        return -1;
+    }
+
+    DEBUG ? printf("Connected to Server\n") : 0;
+
+    return master_sock;
+}
+
+// Function to decode Base64 to binary
+vector<char> base64Decode(const string& encoded_data) {
+    // Create a BIO chain for Base64 decoding
+    BIO* bio = BIO_new_mem_buf(encoded_data.data(), encoded_data.length());
+    BIO* base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Prepare to read the decoded data
+    vector<char> decoded_data(encoded_data.length()); // Allocate enough space
+    int decoded_length = BIO_read(bio, decoded_data.data(), decoded_data.size());
+
+    if (decoded_length < 0) {
+        // Handle the case where decoding fails
+        cerr << "Error decoding Base64 string." << endl;
+        decoded_data.clear();
+    } else {
+        // Resize the vector to the actual decoded length
+        decoded_data.resize(decoded_length);
+    }
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return decoded_data;
+}
+
+string getConfigFile(int master_sock){
+
+    // Send command to server
+    string command = "REQUEST\r\n";
+    if (send(master_sock, command.c_str(), command.length(), 0) < 0)
+    {
+        std::cerr << "Error sending command to server" << std::endl;
+        return "-ERR Error sending command to server";
+    }
+
+    DEBUG ? printf("Sent command to Server\n") : 0;
+
+    // Receive server info
+    string encodedConfig = readFromBackendSocket(master_sock);
+	vector<char> decodedConfigVec = base64Decode(encodedConfig);
+	string decodedConfig(decodedConfigVec.begin(), decodedConfigVec.end());
+
+	printf("decoded config is : %s\n", decodedConfig.c_str());
+	return decodedConfig;
+    
+}
+
+void parseBackendServers(const std::string& fileContents, BackendServerMap& servers) {
+    std::istringstream fileStream(fileContents);
+    std::string line;
+
+    while (std::getline(fileStream, line)) {
+        std::istringstream iss(line);
+        std::vector<std::string> parts;
+        std::string part;
+        while (std::getline(iss, part, ',')) {
             size_t pos = part.find(':');
-            if (pos != string::npos) {
+            if (pos != std::string::npos) {
                 parts.push_back(part.substr(pos + 1));
             } else {
-                cerr << "Invalid format in part: " << part << endl;
+                std::cerr << "Invalid format in part: " << part << std::endl;
             }
         }
 
         if (parts.size() != 6) {
-            cerr << "Invalid line format: " << line << endl;
+            std::cerr << "Invalid line format: " << line << std::endl;
             // skip malformed lines
             continue;
         }
 
         BackendServerInfo info;
 
-        info.replicaGroup = stoi(parts[0]);
+        info.replicaGroup = std::stoi(parts[0]);
         info.ip = parts[1];
-        info.tcpPort = stoi(parts[2]);
-        info.udpPort = stoi(parts[3]);
-        info.udpPort2 = stoi(parts[4]);
-        info.tcpPort2 = stoi(parts[5]);
+        info.tcpPort = std::stoi(parts[2]);
+        info.udpPort = std::stoi(parts[3]);
+        info.udpPort2 = std::stoi(parts[4]);
+        info.tcpPort2 = std::stoi(parts[5]);
 
         servers[info.replicaGroup].push_back(info);
     }
 }
+
 
 
 void parseFrontendServers(const string& filename, FrontendServerMap& servers) {
@@ -361,7 +468,8 @@ void *thread_worker(void *fd) {
 	}
 
     char buffer[READ_SIZE];
-    char *dataBuffer;
+    char *dataBuffer = (char *)malloc(1); // Allocate memory for at least 1 character
+    dataBuffer[0] = '\0';                 // Null-terminate the stringƒ
     char *contentBuffer;
     size_t dataBufferSize = 0;
     //size_t content_read = 0;
@@ -674,9 +782,11 @@ int main(int argc, char *argv[]) {
 	/////////////////
 	// Read Config //
 	/////////////////
-	string backend_config_path = "backendConfig.txt";
+	int master_sock = connectToMaster();
+	string configFile = getConfigFile(master_sock);
+
 	string frontend_config_path = "frontendConfig.txt";
-	parseBackendServers(backend_config_path, backend_servers);
+	parseBackendServers(configFile, backend_servers);
 	parseFrontendServers(frontend_config_path, frontend_servers);
 
 
