@@ -876,7 +876,7 @@ string renderLoginPage(string sid) {
 	content += "<input type=\"submit\" value=\"Submit\">\n";
 	content += "</form>\n";
 	content += "<h2>Change Password</h2>\n";
-	content += "<form action=\"/signup\" method=\"post\">\n";
+	content += "<form action=\"/newpass\" method=\"post\">\n";
 	content += "Username: <input type=\"text\" name=\"username\"><br>\n";
 	content += "Old Password: <input type=\"text\" name=\"oldpass\"><br>\n";
 	content += "New Password: <input type=\"text\" name=\"newpass\"><br>\n";
@@ -1339,11 +1339,24 @@ void *thread_worker(void *fd)
                     }
 
 					else if (reply_code == SIGNUP) {
+                        //wow
 						tuple<string, string> credentials = parseLoginData(string(content));
 						username = get<0>(credentials);
 						string password = get<1>(credentials);
 
-						//TODO store the username and password here
+                        connectToBackend(username, currentClientNumber);
+
+                        //PUT username,password,passwordValue
+                        string command = "PUT " + username + ",password," + password + "\r\n";
+                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
+                        sendToBackendSocket(backend_socks[currentClientNumber].socket, command);
+
+                        DEBUG ? printf("Sent command to server\n") : 0;
+                        string response = readFromBackendSocket(backend_socks[currentClientNumber].socket);
+                        DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+
+                        reply_code = REDIRECT;
+                        username = "";
 					}
 
 					else if (reply_code == NEWPASS) {
@@ -1352,7 +1365,17 @@ void *thread_worker(void *fd)
 						string oldpass = msg_map["oldpass"];
 						string newpass = msg_map["newpass"];
 
+                        connectToBackend(username, currentClientNumber);
+
 						//TODO store the username and password here
+                        //CPUT username,password,oldPasswordValue,newPasswordValue
+                        string command = "CPUT " + username + ",password," + oldpass + "," + newpass + "\r\n";
+                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
+                        sendToBackendSocket(backend_socks[currentClientNumber].socket, command);
+
+                        DEBUG ? printf("Sent command to server\n") : 0;
+                        string response = readFromBackendSocket(backend_socks[currentClientNumber].socket);
+                        DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 					}
 
                     // send or reply email
@@ -1366,10 +1389,13 @@ void *thread_worker(void *fd)
                         {
                             fprintf(stderr, "to: %s\nsubject: %s\nmessage: %s\n", to.c_str(), subject.c_str(), message.c_str());
                         }
-                        // at this point we have the wow wow 
                         // at this point we have the parts of the email
                         //send to mail the parts 
-                        string mailFrom = "MAIL FROM:<" + username + "@localhost>\r\n";
+                        //CHANGES!!!----
+                        size_t posTo = to.find('@');
+                        size_t posFrom = to.find('@');
+                        string domain = to.substr(posTo + 1);
+                        string mailFrom = "MAIL FROM:<" + username + "@" + domain + ">\r\n";
                         sendToBackendSocket(mail_sock , mailFrom);
                         string response = readFromBackendSocket(mail_sock);
                         DEBUG ? printf("Response is %s\n", response.c_str()) : 0;
@@ -1385,7 +1411,12 @@ void *thread_worker(void *fd)
                         sendToBackendSocket(mail_sock , "DATA\r\n");
                         response = readFromBackendSocket(mail_sock);
                         // now send data 
-                        sendToBackendSocket(mail_sock , subject + "\r\n" + message + "\r\n\r\n.\r\n");
+                        string fromEmail = username + "@" + domain;
+                        string toEmail = to;
+                        string messageData = "From: <" + fromEmail  +  ">\r\nTo: <" + toEmail + ">\r\nSubject: " + subject + "\r\n" + message + "\r\n\r\n.\r\n";
+                        sendToBackendSocket(mail_sock , messageData);
+                        //-----
+
                         response = readFromBackendSocket(mail_sock);
                     }
                     // forward email
@@ -1887,5 +1918,4 @@ int main(int argc, char *argv[])
 
     exit(0);
 }
-
 
