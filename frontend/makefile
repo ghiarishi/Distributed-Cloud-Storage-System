@@ -23,10 +23,10 @@ TARGETS = frontendserver loadbalancer
 all: $(TARGETS)
 
 frontendserver: frontendserver.cc
-	g++ $^ -lpthread -g -o $@
+	g++ $^ -lpthread -g -lssl -lcrypto -o $@
 
 loadbalancer: loadbalancer.cc
-	g++ $^ -lpthread -g -o $@
+	g++ $^ -lpthread -g -lssl -lcrypto -o $@
 
 clean::
 	rm -fv $(TARGETS) *~

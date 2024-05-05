@@ -685,15 +685,10 @@ void *handle_connection(void *arg)
                 else
                 {
                   pthread_mutex_lock(&mailboxMutexes[directory + "mqueue"]);
-                  size_t pos = mailFrom.find('@');
-                  mailFrom.replace(pos + 1, std::string::npos, "seas.upenn.edu");
-                  printf("mailFrom is now %s\n", mailFrom.c_str());
                   fprintf(mqueueFile, "From <%s>\nTo <%s>\n%s", mailFrom.c_str(), recipient_email.c_str(), email_content.c_str());
                   pthread_mutex_unlock(&mailboxMutexes[directory + "mqueue"]);
                   flock(fd, LOCK_UN);
                   fclose(mqueueFile);
-                  const char* command = "./smtpec mailtest";
-                  int result = system(command);
                   success = true;
                 }
               }

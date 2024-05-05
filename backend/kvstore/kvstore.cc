@@ -860,7 +860,6 @@ void* threadFunc(void* arg) {
     int bytesRead;
 
     while (true) {
-
         bytesRead = read(conFD, buffer, BUFFER_SIZE);
         if (bytesRead < 0) {
             printDebug("Command at failure: " + command);
