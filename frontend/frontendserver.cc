@@ -140,6 +140,18 @@ void *handleHeartbeat(void *arg)
 //                                 //
 /////////////////////////////////////
 
+// extract path after /drive/
+string extractPath(const string& path) {
+    string key = "drive/";
+    size_t pos = path.find(key);
+
+    if (pos != string::npos) {
+        return path.substr(pos + key.length());
+    } else {
+        // Return an empty string if "/drive/" is not found
+        return "";
+    }
+}
 
 // Get filename from the path
 string getFileName(const string &path)
@@ -1045,85 +1057,87 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
     vector<pair<string, int>> files = get_drive(username, currentClientNumber, dir_path);
 
     string content = "";
-    content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
-    content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    content += "<title>PennCloud Drive</title>";
-    content += "<style>body { font-family: Arial, sans-serif; } ul { list-style-type: none; } li { margin-bottom: 10px; }</style></head><body>";
-    content += "<h1>PennCloud Drive</h1>";
+	content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
+	content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+	content += "<title>PennCloud Drive</title>";
+	content += "<style>body { font-family: Arial, sans-serif; } ul { list-style-type: none; } li { margin-bottom: 10px; }</style></head><body>";
+	content += "<h1>PennCloud Drive</h1>";
 
-    content += "<h2>Create Folder</h2>";
-    content += "<button onclick=\"document.getElementById('create-form').style.display='block'\">Create Folder</button>";
-    content += "<div id='create-form' style='display:none;'>";
-    content += "<form action='/create-folder' method='post'>";
-    content += "<label for='folder-name'>Folder Name:</label>";
-    content += "<input type='text' id='folder-name' name='folderName' required>";
-    content += "<button type='submit'>Create</button>";
-    content += "</form></div>";
+	content += "<h2>Create Folder</h2>";
+	content += "<button onclick=\"document.getElementById('create-form').style.display='block'\">Create Folder</button>";
+	content += "<div id='create-form' style='display:none;'>";
+	content += "<form action='/create-folder' method='post'>";
+	content += "<label for='folder-name'>Folder Name:</label>";
+	content += "<input type='text' id='folder-name' name='folderName' required>";
+	content += "<button type='submit'>Create</button>";
+	content += "</form></div>";
 
-    content += "<h2>Upload File</h2>";
-    content += "<form action='/upload-file' method='post' enctype='multipart/form-data'>";
-    content += "<input type='file' name='fileToUpload' required>";
-    content += "<button type='submit'>Upload File</button>";
-    content += "</form>";
+	content += "<h2>Upload File</h2>";
+	content += "<form action='/upload-file' method='post' enctype='multipart/form-data'>";
+	content += "<input type='file' name='fileToUpload' required>";
+	content += "<button type='submit'>Upload File</button>";
+	content += "</form>";
 
-    content += "<h2>Content</h2>";
-    content += "<ul>";
+	content += "<h2>Content</h2>";
+	content += "<ul>";
 
-    for (const pair<string, int> p : files)
-    {
-        string name = p.first;
-        int isdir = p.second;
-        if (isdir)
-        {
-            content += "<li><a href='/drive/" + name + "'>" + name + "</a>";
-            content += "<form action='/rename' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newName' placeholder='New name'>";
-            content += "<button type='submit'>Rename</button>";
-            content += "</form>";
+	for(const pair<string, int> p : files) {
+		string name = p.first;
+		int isdir = p.second;
+		if (isdir) {
+			if (dir_path == "") {
+				content += "<li><a href='/drive/"  + name + "'>" + name + "</a>";
+			}
+			else {
+				content += "<li><a href='/drive/" + dir_path + "/" + name + "'>" + name + "</a>";
+			}
+			content += "<form action='/rename' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<input type='text' name='newName' placeholder='New name'>";
+			content += "<button type='submit'>Rename</button>";
+			content += "</form>";
 
-            content += "<form action='/move' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newPath' placeholder='New path'>";
-            content += "<button type='submit'>Move</button>";
-            content += "</form>";
+			content += "<form action='/move' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<input type='text' name='newPath' placeholder='New path'>";
+			content += "<button type='submit'>Move</button>";
+			content += "</form>";
 
-            content += "<form action='/delete' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Delete</button>";
-            content += "</form>";
-        }
-        else
-        {
-            content += "<li>" + name;
-            content += "<form action='/rename' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newName' placeholder='New name'>";
-            content += "<button type='submit'>Rename</button>";
-            content += "</form>";
+			content += "<form action='/delete' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<button type='submit'>Delete</button>";
+			content += "</form>";
+		}
+		else {
+			content += "<li>" + name;
+			content += "<form action='/rename' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<input type='text' name='newName' placeholder='New name'>";
+			content += "<button type='submit'>Rename</button>";
+			content += "</form>";
 
-            content += "<form action='/move' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newPath' placeholder='New path'>";
-            content += "<button type='submit'>Move</button>";
-            content += "</form>";
+			content += "<form action='/move' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<input type='text' name='newPath' placeholder='New path'>";
+			content += "<button type='submit'>Move</button>";
+			content += "</form>";
 
-            content += "<form action='/delete' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Delete</button>";
-            content += "</form>";
+			content += "<form action='/delete' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<button type='submit'>Delete</button>";
+			content += "</form>";
 
-            content += "<form action='/download' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Download</button>";
-            content += "</form>";
-        }
-    }
-    content += "</body></html>";
+			content += "<form action='/download' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<button type='submit'>Download</button>";
+			content += "</form>";
+		}
+	}
+	content += "</body></html>";
 
-    string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\nConnection : keep-alive" + "\r\n\r\n";
-    string reply = header + content;
+	string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "+ \
+						to_string(content.length()) + "\r\n\r\n";
+	string reply = header + content;
 
     return reply;
 }
@@ -1607,6 +1621,8 @@ void *thread_worker(void *fd)
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
                         string new_fname = msg_map["newName"];
+                        string fpath = item + "/" + fname;
+						string new_fpath = item + "/" + new_fname;
                         if (DEBUG)
                         {
                             fprintf(stderr, "fname: %s\nnew_fname: %s\n", fname.c_str(), new_fname.c_str());
@@ -1624,6 +1640,8 @@ void *thread_worker(void *fd)
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
                         string new_path = msg_map["newPath"];
+                        string fpath = item + "/" + fname;
+						string new_fpath = new_path + "/" + fname;
                         if (DEBUG)
                         {
                             fprintf(stderr, "fname: %s\nnew_path: %s\n", fname.c_str(), new_path.c_str());
@@ -1644,6 +1662,7 @@ void *thread_worker(void *fd)
                     {
                         map<string, string> msg_map = parseQuery(string(content));
                         string dirname = msg_map["folderName"];
+                        string dirpath = item + "/" + dirname;
                         if (DEBUG)
                         {
                             fprintf(stderr, "dirname: %s\n", dirname.c_str());
@@ -1661,6 +1680,7 @@ void *thread_worker(void *fd)
                         printf("the filedata is %s\n", fdataString.c_str());
                         // this is binary name
                         string fname = msg_pair.second;
+                        string fpath = item + "/" + fname;
 
                         string filePath = fname;
                         // PUT user,/content/<folderPath>, base64EncodedValueOfFile
@@ -1839,10 +1859,11 @@ void *thread_worker(void *fd)
                     }
 
                     // drive page
-                    else if (strncmp(url, "/drive", strlen("/drive")) == 0)
+                    else if (strncmp(url, "/drive", strlen("/drive")) == 0) 
                     {
-                        reply_code = DRIVE;
-                    }
+						reply_code = DRIVE;
+						item = extractPath(string(url));
+					}
 
                     // email content page
                     else if (strstr(url, "/mailbox") != NULL)
