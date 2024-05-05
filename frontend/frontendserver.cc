@@ -579,6 +579,7 @@ void send_file(int client_socket, const string &file_path)
     header << "Content-Length: " << file_size << "\r\n";
     header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
     header << "Connection : keep-alive\r\n";
+    header << "Connection : keep-alive\r\n";
     header << "\r\n";
 
     send(client_socket, header.str().c_str(), header.str().size(), 0);
@@ -587,6 +588,11 @@ void send_file(int client_socket, const string &file_path)
         fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
     }
 
+    char buffer[FBUFFER_SIZE];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
+    {
+        send(client_socket, buffer, file.gcount(), 0);
+    }
     char buffer[FBUFFER_SIZE];
     while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
     {
@@ -1088,29 +1094,29 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
     printf("username is : %s\n", username.c_str());
 
     string content = "";
-    content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
-    content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    content += "<title>PennCloud Drive</title>";
-    content += "<style>body { font-family: Arial, sans-serif; } ul { list-style-type: none; } li { margin-bottom: 10px; }</style></head><body>";
-    content += "<h1>PennCloud Drive</h1>";
+	content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
+	content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+	content += "<title>PennCloud Drive</title>";
+	content += "<style>body { font-family: Arial, sans-serif; } ul { list-style-type: none; } li { margin-bottom: 10px; }</style></head><body>";
+	content += "<h1>PennCloud Drive</h1>";
 
-    content += "<h2>Create Folder</h2>";
-    content += "<button onclick=\"document.getElementById('create-form').style.display='block'\">Create Folder</button>";
-    content += "<div id='create-form' style='display:none;'>";
-    content += "<form action='/create-folder' method='post'>";
-    content += "<label for='folder-name'>Folder Name:</label>";
-    content += "<input type='text' id='folder-name' name='folderName' required>";
-    content += "<button type='submit'>Create</button>";
-    content += "</form></div>";
+	content += "<h2>Create Folder</h2>";
+	content += "<button onclick=\"document.getElementById('create-form').style.display='block'\">Create Folder</button>";
+	content += "<div id='create-form' style='display:none;'>";
+	content += "<form action='/create-folder' method='post'>";
+	content += "<label for='folder-name'>Folder Name:</label>";
+	content += "<input type='text' id='folder-name' name='folderName' required>";
+	content += "<button type='submit'>Create</button>";
+	content += "</form></div>";
 
-    content += "<h2>Upload File</h2>";
-    content += "<form action='/upload-file' method='post' enctype='multipart/form-data'>";
-    content += "<input type='file' name='fileToUpload' required>";
-    content += "<button type='submit'>Upload File</button>";
-    content += "</form>";
+	content += "<h2>Upload File</h2>";
+	content += "<form action='/upload-file' method='post' enctype='multipart/form-data'>";
+	content += "<input type='file' name='fileToUpload' required>";
+	content += "<button type='submit'>Upload File</button>";
+	content += "</form>";
 
-    content += "<h2>Content</h2>";
-    content += "<ul>";
+	content += "<h2>Content</h2>";
+	content += "<ul>";
 
     for (const pair<string, int> p : files)
     {
@@ -1132,44 +1138,43 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
             content += "<button type='submit'>Rename</button>";
             content += "</form>";
 
-            content += "<form action='/move' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newPath' placeholder='New path'>";
-            content += "<button type='submit'>Move</button>";
-            content += "</form>";
+			content += "<form action='/move' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<input type='text' name='newPath' placeholder='New path'>";
+			content += "<button type='submit'>Move</button>";
+			content += "</form>";
 
-            content += "<form action='/delete' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Delete</button>";
-            content += "</form>";
-        }
-        else
-        {
-            content += "<li>" + name;
-            content += "<form action='/rename' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newName' placeholder='New name'>";
-            content += "<button type='submit'>Rename</button>";
-            content += "</form>";
+			content += "<form action='/delete' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<button type='submit'>Delete</button>";
+			content += "</form>";
+		}
+		else {
+			content += "<li>" + name;
+			content += "<form action='/rename' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<input type='text' name='newName' placeholder='New name'>";
+			content += "<button type='submit'>Rename</button>";
+			content += "</form>";
 
-            content += "<form action='/move' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newPath' placeholder='New path'>";
-            content += "<button type='submit'>Move</button>";
-            content += "</form>";
+			content += "<form action='/move' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<input type='text' name='newPath' placeholder='New path'>";
+			content += "<button type='submit'>Move</button>";
+			content += "</form>";
 
-            content += "<form action='/delete' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Delete</button>";
-            content += "</form>";
+			content += "<form action='/delete' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<button type='submit'>Delete</button>";
+			content += "</form>";
 
-            content += "<form action='/download' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Download</button>";
-            content += "</form>";
-        }
-    }
-    content += "</body></html>";
+			content += "<form action='/download' method='post' style='display:inline;'>";
+			content += "<input type='hidden' name='fileName' value='" + name + "'>";
+			content += "<button type='submit'>Download</button>";
+			content += "</form>";
+		}
+	}
+	content += "</body></html>";
 
     string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
                     to_string(content.length()) + "\r\n\r\n";
@@ -1782,6 +1787,7 @@ void *thread_worker(void *fd)
                         map<string, string> msg_map = parseQuery(string(content));
                         string dirname = msg_map["folderName"];
                         string dirpath = item + "/" + dirname;
+                        string dirpath = item + "/" + dirname;
                         if (DEBUG)
                         {
                             fprintf(stderr, "dirname: %s\n", dirname.c_str());
@@ -1833,14 +1839,14 @@ void *thread_worker(void *fd)
                     // send reply
                     if (reply_code == DOWNLOAD)
                     {
-                        string contentStr(content);
-                        printf("content is %s\n", content);
-                        size_t pos = contentStr.find('=');
-                        string filename = contentStr.substr(pos + 1);
-                        string downloadLocation = "/home/cis5050/Downloads/" + contentStr.substr(pos + 1);
-                        printf("filename is %s\n", filename.c_str());
-                        string command = "GET " + username + ",/content/" + contentStr.substr(pos + 1) + "\r\n";
-                        DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
+                        // string contentStr(content);
+                        // printf("content is %s\n", content);
+                        // size_t pos = contentStr.find('=');
+                        // string filename = contentStr.substr(pos + 1);
+                        // string downloadLocation = "/home/cis5050/Downloads/" + contentStr.substr(pos + 1);
+                        // printf("filename is %s\n", filename.c_str());
+                        // string command = "GET " + username + ",/content/" + contentStr.substr(pos + 1) + "\r\n";
+                        // DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
 
                         // NOTE: to send the actual binary data retrieved from the backend, use
                         sendToBackendSocket(currentClientNumber, command , username);
@@ -1990,7 +1996,7 @@ void *thread_worker(void *fd)
                     }
 
                     // drive page
-                    else if (strncmp(url, "/drive", strlen("/drive")) == 0)
+                    else if (strncmp(url, "/drive", strlen("/drive")) == 0) 
                     {
                         reply_code = DRIVE;
                         item = extractPath(string(url));
