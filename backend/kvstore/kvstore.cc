@@ -161,7 +161,8 @@ string readAndWriteFromSocket(int sock, const string &command) {
 // Function to forward request to all secondary servers (only alive servers)
 bool forwardToAllSecondaryServers(string command) {
     printDebug("Forwarding a command of size: " + to_string(command.size()) + " :to all secondary servers");
-    
+    string temp = command.size() > 1000 ? command.substr(0,1000) : command;
+    printDebug("Forwarding a command 1000 : " + temp + " : to all secondary servers");
     auto& serverList = servers[myInfo.replicaGroup]; 
     
     for (auto it = serverList.begin(); it != serverList.end(); ++it) {
@@ -897,6 +898,8 @@ void* threadFunc(void* arg) {
                 // Assuming next char is '\n', check boundary
                 if (i + 1 < bytesRead && buffer[i + 1] == '\n') {
                     printDebug("Command received: " + to_string(command.size()));
+                    string temp = command.size() > 1000 ? command.substr(0,1000) : command;
+                    printDebug("First 1000 characters in command : " + temp);
 
                     vector<string> parameters = splitKVStoreCommand(command);
 
