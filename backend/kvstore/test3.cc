@@ -46,7 +46,7 @@ int main() {
             break;
         }
         count += bytesToSend;
-        usleep(10000); // Slightly longer sleep to avoid overloading network for large sends
+        // usleep(10000); // Slightly longer sleep to avoid overloading network for large sends
     }
 
     write(sock,"\r\n",2);
