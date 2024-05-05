@@ -543,6 +543,7 @@ void send_file(int client_socket, const string &file_path)
 
     header << "Content-Length: " << file_size << "\r\n";
     header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
+    header << "Connection : keep-alive\r\n";
     header << "\r\n";
 
     send(client_socket, header.str().c_str(), header.str().size(), 0);
@@ -551,12 +552,11 @@ void send_file(int client_socket, const string &file_path)
         fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
     }
 
-    // char buffer[FBUFFER_SIZE];
-    // while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
-    // {
-    //     send(client_socket, buffer, file.gcount(), 0);
-    // }
-    // send(client_socket, file_data.c_str(), file_data.size(), 0);
+    char buffer[FBUFFER_SIZE];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
+    {
+        send(client_socket, buffer, file.gcount(), 0);
+    }
 
     if (DEBUG)
     {
@@ -1685,25 +1685,25 @@ void *thread_worker(void *fd)
                     // send reply
                     if (reply_code == DOWNLOAD)
                     {
-                        string contentStr(content);
-                        printf("content is %s\n", content);
-                        size_t pos = contentStr.find('=');
-                        string filename = contentStr.substr(pos + 1);
-                        string downloadLocation = "/home/cis5050/Downloads/" + contentStr.substr(pos + 1);
-                        printf("filename is %s\n", filename.c_str());
-                        string command = "GET " + username + ",/content/" + contentStr.substr(pos + 1) + "\r\n";
-                        DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
+                        // string contentStr(content);
+                        // printf("content is %s\n", content);
+                        // size_t pos = contentStr.find('=');
+                        // string filename = contentStr.substr(pos + 1);
+                        // string downloadLocation = "/home/cis5050/Downloads/" + contentStr.substr(pos + 1);
+                        // printf("filename is %s\n", filename.c_str());
+                        // string command = "GET " + username + ",/content/" + contentStr.substr(pos + 1) + "\r\n";
+                        // DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
 
-                        // // NOTE: to send the actual binary data retrieved from the backend, use
-                        sendToBackendSocket(currentClientNumber , command);
-                        printf("sent to backend socket\n");
-                        string response = readFromBackendSocket(currentClientNumber);
-                        string prefix = "+OK ";
-                        response = response.substr(prefix.length());
-                        string responseDecoded = base64DecodeString(response);
-                        send_file_data(sock, downloadLocation, responseDecoded.size(), &responseDecoded[0]);
-                        // string downloadLocationTest = "/home/cis5050/Downloads/butterfly.jpg";
-                        // send_file(sock , downloadLocationTest);
+                        // // // NOTE: to send the actual binary data retrieved from the backend, use
+                        // sendToBackendSocket(currentClientNumber , command);
+                        // printf("sent to backend socket\n");
+                        // string response = readFromBackendSocket(currentClientNumber);
+                        // string prefix = "+OK ";
+                        // response = response.substr(prefix.length());
+                        // string responseDecoded = base64DecodeString(response);
+                        // send_file_data(sock, downloadLocation, responseDecoded.size(), &responseDecoded[0]);
+                        string downloadLocationTest = "/home/cis5050/Downloads/butterfly.jpg";
+                        send_file(sock , downloadLocationTest);
                     }
 
                     string reply_string = generateReply(reply_code, username, item, sid, currentClientNumber);
