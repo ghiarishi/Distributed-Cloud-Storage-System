@@ -1,4 +1,4 @@
-//frontendserver.cc
+// frontendserver.cc
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,6 +55,7 @@ size_t READ_SIZE = 5;
 size_t FBUFFER_SIZE = 1024;
 const int MAX_CLIENTS = 100;
 int mail_sock;
+const int buffer_size = 4096;
 
 volatile int client_socks[MAX_CLIENTS];
 volatile int num_client;
@@ -140,6 +141,22 @@ void *handleHeartbeat(void *arg)
 //                                 //
 /////////////////////////////////////
 
+// extract path after /drive/
+string extractPath(const string &path)
+{
+    string key = "drive/";
+    size_t pos = path.find(key);
+
+    if (pos != string::npos)
+    {
+        return path.substr(pos + key.length());
+    }
+    else
+    {
+        // Return an empty string if "/drive/" is not found
+        return "";
+    }
+}
 
 // Get filename from the path
 string getFileName(const string &path)
@@ -148,6 +165,19 @@ string getFileName(const string &path)
     if (pos != std::string::npos)
         return path.substr(pos + 1);
     return path;
+}
+
+int countOccurrences(const std::string &str, char target)
+{
+    int count = 0;
+    for (char c : str)
+    {
+        if (c == target)
+        {
+            count++;
+        }
+    }
+    return count;
 }
 
 vector<pair<string, int>> extractFiles(string username, string returnString)
@@ -171,10 +201,15 @@ vector<pair<string, int>> extractFiles(string username, string returnString)
 
     for (string currPath : paths)
     {
-        string fileName = getFileName(currPath);
-        int isFolder = (currPath.find('.') == std::string::npos);
-        pair<string, int> filePair = make_pair(fileName, isFolder);
-        files.push_back(filePair);
+        int countSlash = countOccurrences(currPath, '/');
+        printf("countSlash is %d\n", countSlash);
+        if (countSlash < 3)
+        {
+            string fileName = getFileName(currPath);
+            int isFolder = (currPath.find('.') == std::string::npos);
+            pair<string, int> filePair = make_pair(fileName, isFolder);
+            files.push_back(filePair);
+        }
     }
     return files;
 }
@@ -543,6 +578,7 @@ void send_file(int client_socket, const string &file_path)
 
     header << "Content-Length: " << file_size << "\r\n";
     header << "Content-Disposition: attachment; filename=\"" << file_name << "\"\r\n";
+    header << "Connection : keep-alive\r\n";
     header << "\r\n";
 
     send(client_socket, header.str().c_str(), header.str().size(), 0);
@@ -551,12 +587,11 @@ void send_file(int client_socket, const string &file_path)
         fprintf(stderr, "[%d] S: %s\n", client_socket, header.str().c_str());
     }
 
-    // char buffer[FBUFFER_SIZE];
-    // while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
-    // {
-    //     send(client_socket, buffer, file.gcount(), 0);
-    // }
-    // send(client_socket, file_data.c_str(), file_data.size(), 0);
+    char buffer[FBUFFER_SIZE];
+    while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0)
+    {
+        send(client_socket, buffer, file.gcount(), 0);
+    }
 
     if (DEBUG)
     {
@@ -609,14 +644,98 @@ string generate_cookie()
 //                                 //
 /////////////////////////////////////
 
-// Helper function to send data to backend server
-bool sendToBackendSocket(int clientNumber, string command)
+int connectToBackend(string username, int clientNum)
 {
-    int backend_sock = backend_socks[clientNumber].socket;
-    if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
+    int master_sock, backend_sock;
+    struct sockaddr_in server_addr;
+
+    // Open master socket
+    if ((master_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
+        std::cerr << "Error creating socket" << std::endl;
+        return -1;
+    }
+
+    // Server address
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(2000);
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    // Connect to server
+    if (connect(master_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        std::cerr << "Error connecting to server" << std::endl;
+        return -1;
+    }
+
+    DEBUG ? printf("Connected to Server\n") : 0;
+
+    // Send command to server
+    string command = "GET_SERVER:" + username + "\r\n";
+    if (send(master_sock, command.c_str(), command.length(), 0) < 0)
+    {
+        std::cerr << "Error sending command to server" << std::endl;
+        return -1;
+    }
+
+    DEBUG ? printf("Sent command to Server\n") : 0;
+
+    // Receive server info
+    char serverInfo[buffer_size];
+    if (recv(master_sock, serverInfo, sizeof(serverInfo), 0) < 0)
+    {
+        std::cerr << "Error receiving response from server" << std::endl;
+        return -1;
+    }
+
+    DEBUG ? printf("Received response %s\n", serverInfo) : 0;
+    auto ipAndPort = extractIPAndPort(serverInfo);
+
+    // Connect to backend server
+    if ((backend_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        std::cerr << "Error creating socket" << std::endl;
+        return -1;
+    }
+
+    server_addr.sin_addr.s_addr = inet_addr(ipAndPort.first.c_str());
+    server_addr.sin_port = htons(ipAndPort.second);
+
+    if (connect(backend_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        std::cerr << "Error connecting to backend sock" << std::endl;
+        return -1;
+    }
+
+    char buffer[4096];
+    if (recv(backend_sock, buffer, sizeof(buffer), 0) < 0)
+    {
+        std::cerr << "Error receiving response from server" << std::endl;
+        return -1;
+    }
+
+    printf("Response: %s\n", buffer);
+
+    backend_socks[clientNum].ip = ipAndPort.first;
+    backend_socks[clientNum].port = ipAndPort.second;
+    backend_socks[clientNum].socket = backend_sock;
+    return 0;
+}
+
+// Helper function to send data to backend server
+bool sendToBackendSocket(int clientNumber, string command , string username ) {
+    int backend_sock = backend_socks[clientNumber].socket;
+    if (send(backend_sock, command.c_str(), command.length(), 0) < 0) {
         cerr << "Error sending data to backend server" << std::endl;
-        return false;
+        if (!connectToBackend(username , clientNumber)) {
+            cerr << "Failed to reconnect to backend server" << std::endl;
+            return false;
+        }
+        // Retry sending after successful reconnection
+        if (send(backend_sock, command.c_str(), command.length(), 0) < 0) {
+            cerr << "Error sending data after reconnection" << std::endl;
+            return false;
+        }
     }
     return true;
 }
@@ -632,31 +751,29 @@ bool sendToSocket(int backend_sock, string command)
 }
 
 // Helper function to read from backend socket
-string readFromBackendSocket(int clientNumber)
-{
+string readFromBackendSocket(int clientNumber , string username ) {
     string response;
     char buffer[4096];
     int backend_sock = backend_socks[clientNumber].socket;
 
-    while (true)
-    {
+    while (true) {
         memset(buffer, 0, sizeof(buffer));
 
         int bytesReceived = recv(backend_sock, buffer, sizeof(buffer), 0);
-        if (bytesReceived < 0)
-        {
+        if (bytesReceived < 0) {
             cerr << "Error receiving response from server" << std::endl;
-            return "";
+            if (!connectToBackend(username , clientNumber)) {
+                cerr << "Failed to reconnect to backend server" << std::endl;
+                return "";
+            }
+            continue; // Retry reading after successful reconnection
         }
-        //printf("the buffer is %s\n", buffer);
 
         response.append(buffer, bytesReceived);
 
-        // Check if "\r\n" is present in the received data
         size_t found = response.find("\r\n");
-        if (found != std::string::npos)
-        {
-            break; // Exit loop if "\r\n" is found
+        if (found != std::string::npos) {
+            break;
         }
     }
 
@@ -678,7 +795,7 @@ string readFromSocket(int backend_sock)
             cerr << "Error receiving response from server" << std::endl;
             return "";
         }
-        //printf("the buffer is %s\n", buffer);
+        // printf("the buffer is %s\n", buffer);
 
         response.append(buffer, bytesReceived);
 
@@ -780,83 +897,7 @@ int connectToMail()
     return mail_sock_temp;
 }
 
-int connectToBackend(string username, int clientNum)
-{
-    int master_sock, backend_sock;
-    struct sockaddr_in server_addr;
 
-    // Open master socket
-    if ((master_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        std::cerr << "Error creating socket" << std::endl;
-        return -1;
-    }
-
-    // Server address
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(2000);
-    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    // Connect to server
-    if (connect(master_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-    {
-        std::cerr << "Error connecting to server" << std::endl;
-        return -1;
-    }
-
-    DEBUG ? printf("Connected to Server\n") : 0;
-
-    // Send command to server
-    string command = "GET_SERVER:" + username + "\r\n";
-    if (send(master_sock, command.c_str(), command.length(), 0) < 0)
-    {
-        std::cerr << "Error sending command to server" << std::endl;
-        return -1;
-    }
-
-    DEBUG ? printf("Sent command to Server\n") : 0;
-
-    // Receive server info
-    char serverInfo[1024];
-    if (recv(master_sock, serverInfo, sizeof(serverInfo), 0) < 0)
-    {
-        std::cerr << "Error receiving response from server" << std::endl;
-        return -1;
-    }
-
-    DEBUG ? printf("Received response %s\n", serverInfo) : 0;
-    auto ipAndPort = extractIPAndPort(serverInfo);
-
-    // Connect to backend server
-    if ((backend_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        std::cerr << "Error creating socket" << std::endl;
-        return -1;
-    }
-
-    server_addr.sin_addr.s_addr = inet_addr(ipAndPort.first.c_str());
-    server_addr.sin_port = htons(ipAndPort.second);
-
-    if (connect(backend_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-    {
-        std::cerr << "Error connecting to backend sock" << std::endl;
-        return -1;
-    }
-
-    char buffer[4096];
-    if (recv(backend_sock, buffer, sizeof(buffer), 0) < 0)
-    {
-        std::cerr << "Error receiving response from server" << std::endl;
-        return -1;
-    }
-
-    printf("Response: %s\n", buffer);
-
-    backend_socks[clientNum].ip = ipAndPort.first;
-    backend_socks[clientNum].port = ipAndPort.second;
-    backend_socks[clientNum].socket = backend_sock;
-    return 0;
-}
 
 // login verification
 int authenticate(string username, string password, int currentClient)
@@ -864,11 +905,11 @@ int authenticate(string username, string password, int currentClient)
     string command = "GET " + username + ",password\r\n";
 
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClient].socket) : 0;
-    sendToBackendSocket(currentClient , command);
+    sendToBackendSocket(currentClient, command , username);
 
     DEBUG ? printf("Sent command to server\n") : 0;
 
-    string response = readFromBackendSocket(currentClient);
+    string response = readFromBackendSocket(currentClient , username);
     string rightPassword = extractPassword(response);
     DEBUG ? printf("Response: %s Correct password is: |%s| and user entered: |%s|\n", response.c_str(), rightPassword.c_str(), password.c_str()) : 0;
 
@@ -880,9 +921,9 @@ vector<email> get_mailbox(string username, int currentClientNumber)
 {
     string command = "LIST " + username + ",/emails\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-    sendToBackendSocket(currentClientNumber , command);
+    sendToBackendSocket(currentClientNumber, command , username);
 
-    string response = readFromBackendSocket(currentClientNumber);
+    string response = readFromBackendSocket(currentClientNumber , username);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
     vector<email> emails = extractEmails(username, response);
@@ -890,13 +931,13 @@ vector<email> get_mailbox(string username, int currentClientNumber)
     return emails;
 }
 
-string getEmailContent(string emailID, int currentClientNumber)
+string getEmailContent(string emailID, int currentClientNumber , string username)
 {
     string command = "GET " + emailID + "\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-    sendToBackendSocket(currentClientNumber , command);
+    sendToBackendSocket(currentClientNumber, command , username);
 
-    string response = readFromBackendSocket(currentClientNumber);
+    string response = readFromBackendSocket(currentClientNumber , username);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
     size_t pos = response.find("+OK");
@@ -912,12 +953,12 @@ vector<pair<string, int>> get_drive(string username, int currentClientNumber, st
     // pair<string, int> f2 = make_pair("image_1.png", 0);
     // pair<string, int> d1 = make_pair("folder_1", 1);
     // vector<pair<string, int>> files = {f1, f2, d1};
-
-    string command = "LIST " + username + ",/content\r\n";
+    printf("dir path is : %s\n", dir_path.c_str());
+    string command = "LIST " + username + ",/content/" + dir_path + "\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-    sendToBackendSocket(currentClientNumber , command);
+    sendToBackendSocket(currentClientNumber, command , username);
 
-    string response = readFromBackendSocket(currentClientNumber);
+    string response = readFromBackendSocket(currentClientNumber , username);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
     vector<pair<string, int>> files = extractFiles(username, response);
@@ -1043,6 +1084,8 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
 {
 
     vector<pair<string, int>> files = get_drive(username, currentClientNumber, dir_path);
+    printf("directory path is : %s\n", dir_path.c_str());
+    printf("username is : %s\n", username.c_str());
 
     string content = "";
     content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
@@ -1075,7 +1118,14 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
         int isdir = p.second;
         if (isdir)
         {
-            content += "<li><a href='/drive/" + name + "'>" + name + "</a>";
+            if (dir_path == "")
+            {
+                content += "<li><a href='/drive/" + name + "'>" + name + "</a>";
+            }
+            else
+            {
+                content += "<li><a href='/drive/" + dir_path + "/" + name + "'>" + name + "</a>";
+            }
             content += "<form action='/rename' method='post' style='display:inline;'>";
             content += "<input type='hidden' name='fileName' value='" + name + "'>";
             content += "<input type='text' name='newName' placeholder='New name'>";
@@ -1122,7 +1172,7 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
     content += "</body></html>";
 
     string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\nConnection : keep-alive" + "\r\n\r\n";
+                    to_string(content.length()) + "\r\n\r\n";
     string reply = header + content;
 
     return reply;
@@ -1178,7 +1228,7 @@ string renderEmailPage(string username, string item, int currentClientNumber)
     }
     else
     {
-        string encodedMessage = getEmailContent(item, currentClientNumber);
+        string encodedMessage = getEmailContent(item, currentClientNumber , username);
         vector<char> decodedEmailVector = base64Decode(encodedMessage);
         string decodedEmail(decodedEmailVector.begin(), decodedEmailVector.end());
         printf("encoded email is %s\n", encodedMessage.c_str());
@@ -1514,10 +1564,10 @@ void *thread_worker(void *fd)
                         // PUT username,password,passwordValue
                         string command = "PUT " + username + ",password," + password + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber , command);
+                        sendToBackendSocket(currentClientNumber, command , username);
 
                         DEBUG ? printf("Sent command to server\n") : 0;
-                        string response = readFromBackendSocket(currentClientNumber);
+                        string response = readFromBackendSocket(currentClientNumber , username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
                         reply_code = REDIRECT;
@@ -1537,13 +1587,12 @@ void *thread_worker(void *fd)
                         // CPUT username,password,oldPasswordValue,newPasswordValue
                         string command = "CPUT " + username + ",password," + oldpass + "," + newpass + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber , command);
+                        sendToBackendSocket(currentClientNumber, command , username);
 
                         DEBUG ? printf("Sent command to server\n") : 0;
-                        string response = readFromBackendSocket(currentClientNumber);
+                        string response = readFromBackendSocket(currentClientNumber , username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                     }
-
                     // send or reply email
                     else if (reply_code == SENDEMAIL)
                     {
@@ -1574,16 +1623,16 @@ void *thread_worker(void *fd)
                         }
                         // first query for this email
                         string command = "GET " + emailId + "\r\n";
-                        sendToBackendSocket(currentClientNumber , command);
+                        sendToBackendSocket(currentClientNumber, command , username);
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        string response = readFromBackendSocket(currentClientNumber);
+                        string response = readFromBackendSocket(currentClientNumber , username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                         vector<char> responseVec = base64Decode(response);
                         string responseDecoded(responseVec.begin(), responseVec.end());
                         DEBUG ? printf("Response decoded : %s \n", responseDecoded.c_str()) : 0;
                         string subject = "blank";
                         string message = "message";
-                        mailMessage(username , to , subject , message);
+                        mailMessage(username, to, subject, message);
                     }
 
                     else if (reply_code == DELETE)
@@ -1594,11 +1643,11 @@ void *thread_worker(void *fd)
                         {
                             fprintf(stderr, "fname: %s\n", fname.c_str());
                         }
-                        //Delete username,/content/bongo/spaceflare.jpg
-                        string command = "DELETE " + username + ",/content" + fname  + "\r\n";
-                        sendToBackendSocket(currentClientNumber , command);
+                        // Delete username,/content/bongo/spaceflare.jpg
+                        string command = "DELETE " + username + ",/content/" + fname + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        string response = readFromBackendSocket(currentClientNumber);
+                        sendToBackendSocket(currentClientNumber, command , username);
+                        string response = readFromBackendSocket(currentClientNumber , username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                     }
 
@@ -1607,16 +1656,39 @@ void *thread_worker(void *fd)
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
                         string new_fname = msg_map["newName"];
+                        string fpath = fname;
+                        string new_fpath = new_fname;
+                        if (item.size() != 0)
+                        {
+                            fpath = item + "/" + fname;
+                            new_fpath = item + "/" + new_fname;
+                        }
+
                         if (DEBUG)
                         {
                             fprintf(stderr, "fname: %s\nnew_fname: %s\n", fname.c_str(), new_fname.c_str());
                         }
-                        string command = "CPUT content/" + username + ",/" + fname  + "\r\n";
-                        sendToBackendSocket(currentClientNumber , command);
+                        string command = "GET " + username + ",/content/" + fpath + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        string response = readFromBackendSocket(currentClientNumber);
+                        sendToBackendSocket(currentClientNumber, command , username);
+                        string response = readFromBackendSocket(currentClientNumber , username);
+                        DEBUG ? printf("Response: %.100s \n", response.substr(0, 200).c_str()) : 0;
+
+                        // remove +OK
+                        string prefix = "+OK ";
+                        response = response.substr(prefix.length());
+
+                        command = "PUT " + username + ",/content/" + new_fpath + "," + response;
+                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                        sendToBackendSocket(currentClientNumber, command , username);
+                        response = readFromBackendSocket(currentClientNumber , username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
+                        command = "DELETE " + username + ",/content/" + fpath + "\r\n";
+                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
+                        sendToBackendSocket(currentClientNumber, command , username);
+                        response = readFromBackendSocket(currentClientNumber , username);
+                        DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                     }
 
                     else if (reply_code == MOVE)
@@ -1624,19 +1696,84 @@ void *thread_worker(void *fd)
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
                         string new_path = msg_map["newPath"];
+                        string fpath = fname;
+                        string new_fpath = new_path;
+                        if (item.size() != 0)
+                        {
+                            fpath = item + "/" + fname;
+                            new_fpath = new_path + "/" + fname;
+                        }
                         if (DEBUG)
                         {
                             fprintf(stderr, "fname: %s\nnew_path: %s\n", fname.c_str(), new_path.c_str());
                         }
-                    }
-
-                    else if (reply_code == DELETE)
-                    {
-                        map<string, string> msg_map = parseQuery(string(content));
-                        string fname = msg_map["fileName"];
-                        if (DEBUG)
+                        int isFolder = (fname.find('.') == std::string::npos);
+                        if (isFolder)
                         {
-                            fprintf(stderr, "fname: %s\n", fname.c_str());
+                            // LIST cally,/content or LIST cally,/content/butterflyFour
+                            string command = "LIST " + username + ",/content/" + fpath + "\r\n";
+                            DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                            sendToBackendSocket(currentClientNumber, command , username);
+                            string response = readFromBackendSocket(currentClientNumber , username);
+                            DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+
+                            stringstream ss(response);
+                            string line;
+                            vector<string> lines;
+
+                            while (getline(ss, line, '\n'))
+                            {
+                                lines.push_back(line);
+                            }
+                            // Process each line
+                            for (const auto &line : lines)
+                            {
+                                if (line != "\r\n")
+                                {
+                                    // For each LIST item ( for ex : /content/butterflyFour/filename.txt )
+                                    // GET cally,/content/butterflyFour/filename.txt
+                                    // PUT cally,/content/newpath,valuethatweGot
+                                    // DELETE cally,/content/butterflyFour/filename.txt
+                                    command = "GET " + username + "," + line + "\r\n";
+                                    DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                                    sendToBackendSocket(currentClientNumber, command , username);
+                                    response = readFromBackendSocket(currentClientNumber , username);
+                                    DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+
+                                    command = "PUT " + username + "," + new_fpath + "," + response;
+                                    DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                                    sendToBackendSocket(currentClientNumber, command , username);
+                                    response = readFromBackendSocket(currentClientNumber , username);
+                                    DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+
+                                    command = "DELETE " + username + "," + line + "\r\n";
+                                    DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                                    sendToBackendSocket(currentClientNumber, command , username);
+                                    response = readFromBackendSocket(currentClientNumber , username);
+                                    DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // in this case it's file that we're trying to move
+                            string command = "GET " + username + ",/content/" + fpath + "\r\n";
+                            DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                            sendToBackendSocket(currentClientNumber, command , username);
+                            string response = readFromBackendSocket(currentClientNumber , username);
+                            DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+
+                            command = "PUT " + username + "," + new_fpath + "," + response;
+                            DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                            sendToBackendSocket(currentClientNumber, command , username);
+                            response = readFromBackendSocket(currentClientNumber , username);
+                            DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+
+                            command = "DELETE " + username + ",/content/" + fpath + "\r\n";
+                            DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                            sendToBackendSocket(currentClientNumber, command , username);
+                            response = readFromBackendSocket(currentClientNumber , username);
+                            DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                         }
                     }
 
@@ -1644,10 +1781,16 @@ void *thread_worker(void *fd)
                     {
                         map<string, string> msg_map = parseQuery(string(content));
                         string dirname = msg_map["folderName"];
+                        string dirpath = item + "/" + dirname;
                         if (DEBUG)
                         {
                             fprintf(stderr, "dirname: %s\n", dirname.c_str());
                         }
+                        string command = "PUT " + username + ",/content" + dirpath + "," + "dummyData" + "\r\n";
+                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
+                        sendToBackendSocket(currentClientNumber, command , username);
+                        DEBUG ? printf("Sent command to server\n") : 0;
+                        string response = readFromBackendSocket(currentClientNumber , username);
                     }
 
                     else if (reply_code == UPLOAD)
@@ -1661,18 +1804,23 @@ void *thread_worker(void *fd)
                         printf("the filedata is %s\n", fdataString.c_str());
                         // this is binary name
                         string fname = msg_pair.second;
+                        string fpath = fname;
+                        if (item.size() != 0)
+                        {
+                            fpath = item + "/" + fname;
+                        }
 
                         string filePath = fname;
                         // PUT user,/content/<folderPath>, base64EncodedValueOfFile
                         printf(" the size of data is %ld\n", fdata.size());
-                        string command = "PUT " + username + ",/content/" + filePath + "," + fdataString + "\r\n";
-                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber , command);
+                        string command = "PUT " + username + ",/content/" + fpath + "," + fdataString + "\r\n";
+                        DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 100).c_str(), backend_socks[currentClientNumber].socket) : 0;
+                        sendToBackendSocket(currentClientNumber, command , username);
 
                         DEBUG ? printf("Sent command to server\n") : 0;
-                        string response = readFromBackendSocket(currentClientNumber);
-                        //DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
-                        // need to get complete path
+                        string response = readFromBackendSocket(currentClientNumber , username);
+                        // DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+                        //  need to get complete path
                         contentType = "";
                     }
 
@@ -1694,10 +1842,10 @@ void *thread_worker(void *fd)
                         string command = "GET " + username + ",/content/" + contentStr.substr(pos + 1) + "\r\n";
                         DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
 
-                        // // NOTE: to send the actual binary data retrieved from the backend, use
-                        sendToBackendSocket(currentClientNumber , command);
+                        // NOTE: to send the actual binary data retrieved from the backend, use
+                        sendToBackendSocket(currentClientNumber, command , username);
                         printf("sent to backend socket\n");
-                        string response = readFromBackendSocket(currentClientNumber);
+                        string response = readFromBackendSocket(currentClientNumber , username);
                         string prefix = "+OK ";
                         response = response.substr(prefix.length());
                         string responseDecoded = base64DecodeString(response);
@@ -1709,10 +1857,13 @@ void *thread_worker(void *fd)
                     string reply_string = generateReply(reply_code, username, item, sid, currentClientNumber);
                     const char *reply = reply_string.c_str();
 
-                    send(sock, reply, strlen(reply), 0);
-                    if (DEBUG)
+                    if (reply_code != DOWNLOAD)
                     {
-                        fprintf(stderr, "[%d] S: %s\n", sock, reply);
+                        send(sock, reply, strlen(reply), 0);
+                        if (DEBUG)
+                        {
+                            fprintf(stderr, "[%d] S: %s\n", sock, reply);
+                        }
                     }
 
                     // clear the buffer
@@ -1842,6 +1993,7 @@ void *thread_worker(void *fd)
                     else if (strncmp(url, "/drive", strlen("/drive")) == 0)
                     {
                         reply_code = DRIVE;
+                        item = extractPath(string(url));
                     }
 
                     // email content page
