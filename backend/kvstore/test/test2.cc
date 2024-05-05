@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include "constants.h"
 
 using namespace std;
 
@@ -28,14 +29,16 @@ int main() {
     }
 
     // Open the file
-    std::ifstream file1("/home/cis5050/sp24-cis5050-T18/backend/kvstore/test2.txt", ios::binary);
+    std::ifstream file1("test2.txt", ios::binary);
+    // std::ifstream file1("test5.txt", ios::binary);
+
     if (!file1.is_open()) {
         std::cerr << "Failed to open file\n";
         return 1;
     }
 
     // Use a buffer to read and send data
-    const size_t bufferSize = 4096;
+    const size_t bufferSize = BUFFER_SIZE;
     char buffer[bufferSize];
     long long count = 0;
 
