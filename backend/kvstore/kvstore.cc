@@ -792,6 +792,7 @@ void adminConsoleSignalHandler() {
                                 count++;
                             }
                         }
+                        response += "\r\n";
                     } else if (temp == "GET ") {
                         if (commands.size() == 3) {
                             string row = commands[1];
