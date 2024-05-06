@@ -89,7 +89,6 @@ int ADMIN = 14;
 int SIGNUP = 20;
 int NEWPASS = 21;
 
-
 /////////////////////////////////////
 //								   //
 //			 Heartbeat             //
@@ -142,6 +141,36 @@ void *handleHeartbeat(void *arg)
 //                                 //
 /////////////////////////////////////
 
+std::tuple<std::string, std::string> extractSubjectAndMessage(const std::string &email)
+{
+    std::string subject, message;
+
+    // Find the position of "Subject: "
+    size_t subjectPos = email.find("Subject: ");
+    if (subjectPos != std::string::npos)
+    {
+        // Extract the subject starting from the position after "Subject: "
+        subject = email.substr(subjectPos + 9); // 9 is the length of "Subject: "
+
+        // Find the position of the next occurrence of "\n" after the subject
+        size_t newlinePos = subject.find("\n");
+        if (newlinePos != std::string::npos)
+        {
+            // Extract the message starting from the position after the newline
+            message = subject.substr(newlinePos + 1);
+            // Remove the trailing newline if present
+            if (!message.empty() && message.back() == '\n')
+            {
+                message.pop_back();
+            }
+            // Trim any leading whitespace from the message
+            message.erase(0, message.find_first_not_of(" \t\n\r\f\v"));
+        }
+    }
+
+    return std::make_tuple(subject, message);
+}
+
 // extract path after /drive/
 string extractPath(const string &path)
 {
@@ -181,7 +210,7 @@ int countOccurrences(const std::string &str, char target)
     return count;
 }
 
-vector<pair<string, int>> extractFiles(string username, string returnString)
+vector<pair<string, int>> extractFiles(string username, string returnString, string directoryPath)
 {
     vector<string> paths;
     istringstream iss(returnString);
@@ -195,22 +224,31 @@ vector<pair<string, int>> extractFiles(string username, string returnString)
         if (startPos != std::string::npos)
         {
             // Extract path starting from "/content/"
-            std::string path = line.substr(startPos);
-            paths.push_back(path);
+            std::string path = line.substr(startPos + 9);
+            printf(" The path is |%s| directoryPath is |%s|\n", path.c_str(), directoryPath.c_str());
+            startPos = path.find(directoryPath);
+            string remainingText = path.substr(startPos + directoryPath.size());
+            printf("The remainingText is %s\n", remainingText.c_str());
+            if (directoryPath.size() == 0 && remainingText.find("/") == std::string::npos)
+            {
+                printf("we are adding path\n");
+                paths.push_back(path);
+            }
+            else if (directoryPath.size() != 0 && remainingText.find("/") != std::string::npos &&
+                     remainingText.find("/", remainingText.find("/") + 1) == std::string::npos)
+            {
+                printf("we are adding path\n");
+                paths.push_back(path);
+            }
         }
     }
 
     for (string currPath : paths)
     {
-        int countSlash = countOccurrences(currPath, '/');
-        printf("countSlash is %d\n", countSlash);
-        if (countSlash < 3)
-        {
-            string fileName = getFileName(currPath);
-            int isFolder = (currPath.find('.') == std::string::npos);
-            pair<string, int> filePair = make_pair(fileName, isFolder);
-            files.push_back(filePair);
-        }
+        string fileName = getFileName(currPath);
+        int isFolder = (currPath.find('.') == std::string::npos);
+        pair<string, int> filePair = make_pair(fileName, isFolder);
+        files.push_back(filePair);
     }
     return files;
 }
@@ -408,18 +446,28 @@ vector<Node> getBackendNodes(string filename)
 // Parse login data
 tuple<string, string> parseLoginData(string data_str)
 {
+    std::istringstream iss(data_str);
+    std::string pair;
+    std::string username, password;
 
-    const char *data = data_str.c_str();
-    // parse request url
-    char tmp[strlen(data)];
-    strncpy(tmp, data, strlen(data));
-    tmp[strlen(data)] = '\0';
-    strtok(tmp, "=");
-    char *username = strtok(NULL, "&");
-    strtok(NULL, "=");
-    char *password = strtok(NULL, "");
+    while (std::getline(iss, pair, '&'))
+    {
+        std::istringstream issPair(pair);
+        std::string key, value;
+        std::getline(issPair, key, '=');
+        std::getline(issPair, value, '=');
 
-    return make_tuple(string(username), string(password));
+        if (key == "username")
+        {
+            username = value;
+        }
+        else if (key == "password")
+        {
+            password = value;
+        }
+    }
+
+    return make_tuple(username, password);
 }
 
 string decodeURIComponent(const string &s)
@@ -723,16 +771,20 @@ int connectToBackend(string username, int clientNum)
 }
 
 // Helper function to send data to backend server
-bool sendToBackendSocket(int clientNumber, string command , string username ) {
+bool sendToBackendSocket(int clientNumber, string command, string username)
+{
     int backend_sock = backend_socks[clientNumber].socket;
-    if (send(backend_sock, command.c_str(), command.length(), 0) < 0) {
+    if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
+    {
         cerr << "Error sending data to backend server" << std::endl;
-        if (!connectToBackend(username , clientNumber)) {
+        if (!connectToBackend(username, clientNumber))
+        {
             cerr << "Failed to reconnect to backend server" << std::endl;
             return false;
         }
         // Retry sending after successful reconnection
-        if (send(backend_sock, command.c_str(), command.length(), 0) < 0) {
+        if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
+        {
             cerr << "Error sending data after reconnection" << std::endl;
             return false;
         }
@@ -751,18 +803,22 @@ bool sendToSocket(int backend_sock, string command)
 }
 
 // Helper function to read from backend socket
-string readFromBackendSocket(int clientNumber , string username ) {
+string readFromBackendSocket(int clientNumber, string username)
+{
     string response;
     char buffer[4096];
     int backend_sock = backend_socks[clientNumber].socket;
 
-    while (true) {
+    while (true)
+    {
         memset(buffer, 0, sizeof(buffer));
 
         int bytesReceived = recv(backend_sock, buffer, sizeof(buffer), 0);
-        if (bytesReceived < 0) {
+        if (bytesReceived < 0)
+        {
             cerr << "Error receiving response from server" << std::endl;
-            if (!connectToBackend(username , clientNumber)) {
+            if (!connectToBackend(username, clientNumber))
+            {
                 cerr << "Failed to reconnect to backend server" << std::endl;
                 return "";
             }
@@ -772,7 +828,8 @@ string readFromBackendSocket(int clientNumber , string username ) {
         response.append(buffer, bytesReceived);
 
         size_t found = response.find("\r\n");
-        if (found != std::string::npos) {
+        if (found != std::string::npos)
+        {
             break;
         }
     }
@@ -897,23 +954,26 @@ int connectToMail()
     return mail_sock_temp;
 }
 
-
-
 // login verification
 int authenticate(string username, string password, int currentClient)
 {
     string command = "GET " + username + ",password\r\n";
 
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClient].socket) : 0;
-    sendToBackendSocket(currentClient, command , username);
+    sendToBackendSocket(currentClient, command, username);
 
     DEBUG ? printf("Sent command to server\n") : 0;
 
-    string response = readFromBackendSocket(currentClient , username);
-    string rightPassword = extractPassword(response);
-    DEBUG ? printf("Response: %s Correct password is: |%s| and user entered: |%s|\n", response.c_str(), rightPassword.c_str(), password.c_str()) : 0;
+    string response = readFromBackendSocket(currentClient, username);
+    string rightPasswordEncoded = extractPassword(response);
+    string decodedPassword = base64DecodeString(rightPasswordEncoded);
+    DEBUG ? printf("Response: %s decoded correct password is: |%s| and user entered: |%s|\n", response.c_str(), decodedPassword.c_str(), password.c_str()) : 0;
 
-    return password == rightPassword ? 1 : 0;
+    if (decodedPassword.size() == 0)
+    {
+        return 0;
+    }
+    return password == decodedPassword ? 1 : 0;
 }
 
 // retrieve emails in mailbox
@@ -921,9 +981,9 @@ vector<email> get_mailbox(string username, int currentClientNumber)
 {
     string command = "LIST " + username + ",/emails\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-    sendToBackendSocket(currentClientNumber, command , username);
+    sendToBackendSocket(currentClientNumber, command, username);
 
-    string response = readFromBackendSocket(currentClientNumber , username);
+    string response = readFromBackendSocket(currentClientNumber, username);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
     vector<email> emails = extractEmails(username, response);
@@ -931,13 +991,13 @@ vector<email> get_mailbox(string username, int currentClientNumber)
     return emails;
 }
 
-string getEmailContent(string emailID, int currentClientNumber , string username)
+string getEmailContent(string emailID, int currentClientNumber, string username)
 {
     string command = "GET " + emailID + "\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-    sendToBackendSocket(currentClientNumber, command , username);
+    sendToBackendSocket(currentClientNumber, command, username);
 
-    string response = readFromBackendSocket(currentClientNumber , username);
+    string response = readFromBackendSocket(currentClientNumber, username);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
     size_t pos = response.find("+OK");
@@ -956,12 +1016,17 @@ vector<pair<string, int>> get_drive(string username, int currentClientNumber, st
     printf("dir path is : %s\n", dir_path.c_str());
     string command = "LIST " + username + ",/content/" + dir_path + "\r\n";
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-    sendToBackendSocket(currentClientNumber, command , username);
+    sendToBackendSocket(currentClientNumber, command, username);
 
-    string response = readFromBackendSocket(currentClientNumber , username);
+    string response = readFromBackendSocket(currentClientNumber, username);
     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-    vector<pair<string, int>> files = extractFiles(username, response);
+    vector<pair<string, int>> files = extractFiles(username, response, dir_path);
+
+    string target_entry = dir_path;
+    files.erase(std::remove_if(files.begin(), files.end(), [&](const pair<string, int> &file)
+                               { return file.first == target_entry; }),
+                files.end());
 
     DEBUG ? printf("The files we have are  \n") : 0;
     for (const auto &pair : files)
@@ -1088,29 +1153,29 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
     printf("username is : %s\n", username.c_str());
 
     string content = "";
-	content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
-	content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-	content += "<title>PennCloud Drive</title>";
-	content += "<style>body { font-family: Arial, sans-serif; } ul { list-style-type: none; } li { margin-bottom: 10px; }</style></head><body>";
-	content += "<h1>PennCloud Drive</h1>";
+    content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
+    content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    content += "<title>PennCloud Drive</title>";
+    content += "<style>body { font-family: Arial, sans-serif; } ul { list-style-type: none; } li { margin-bottom: 10px; }</style></head><body>";
+    content += "<h1>PennCloud Drive</h1>";
 
-	content += "<h2>Create Folder</h2>";
-	content += "<button onclick=\"document.getElementById('create-form').style.display='block'\">Create Folder</button>";
-	content += "<div id='create-form' style='display:none;'>";
-	content += "<form action='/create-folder' method='post'>";
-	content += "<label for='folder-name'>Folder Name:</label>";
-	content += "<input type='text' id='folder-name' name='folderName' required>";
-	content += "<button type='submit'>Create</button>";
-	content += "</form></div>";
+    content += "<h2>Create Folder</h2>";
+    content += "<button onclick=\"document.getElementById('create-form').style.display='block'\">Create Folder</button>";
+    content += "<div id='create-form' style='display:none;'>";
+    content += "<form action='/create-folder' method='post'>";
+    content += "<label for='folder-name'>Folder Name:</label>";
+    content += "<input type='text' id='folder-name' name='folderName' required>";
+    content += "<button type='submit'>Create</button>";
+    content += "</form></div>";
 
-	content += "<h2>Upload File</h2>";
-	content += "<form action='/upload-file' method='post' enctype='multipart/form-data'>";
-	content += "<input type='file' name='fileToUpload' required>";
-	content += "<button type='submit'>Upload File</button>";
-	content += "</form>";
+    content += "<h2>Upload File</h2>";
+    content += "<form action='/upload-file' method='post' enctype='multipart/form-data'>";
+    content += "<input type='file' name='fileToUpload' required>";
+    content += "<button type='submit'>Upload File</button>";
+    content += "</form>";
 
-	content += "<h2>Content</h2>";
-	content += "<ul>";
+    content += "<h2>Content</h2>";
+    content += "<ul>";
 
     for (const pair<string, int> p : files)
     {
@@ -1132,43 +1197,44 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
             content += "<button type='submit'>Rename</button>";
             content += "</form>";
 
-			content += "<form action='/move' method='post' style='display:inline;'>";
-			content += "<input type='hidden' name='fileName' value='" + name + "'>";
-			content += "<input type='text' name='newPath' placeholder='New path'>";
-			content += "<button type='submit'>Move</button>";
-			content += "</form>";
+            content += "<form action='/move' method='post' style='display:inline;'>";
+            content += "<input type='hidden' name='fileName' value='" + name + "'>";
+            content += "<input type='text' name='newPath' placeholder='New path'>";
+            content += "<button type='submit'>Move</button>";
+            content += "</form>";
 
-			content += "<form action='/delete' method='post' style='display:inline;'>";
-			content += "<input type='hidden' name='fileName' value='" + name + "'>";
-			content += "<button type='submit'>Delete</button>";
-			content += "</form>";
-		}
-		else {
-			content += "<li>" + name;
-			content += "<form action='/rename' method='post' style='display:inline;'>";
-			content += "<input type='hidden' name='fileName' value='" + name + "'>";
-			content += "<input type='text' name='newName' placeholder='New name'>";
-			content += "<button type='submit'>Rename</button>";
-			content += "</form>";
+            content += "<form action='/delete' method='post' style='display:inline;'>";
+            content += "<input type='hidden' name='fileName' value='" + name + "'>";
+            content += "<button type='submit'>Delete</button>";
+            content += "</form>";
+        }
+        else
+        {
+            content += "<li>" + name;
+            content += "<form action='/rename' method='post' style='display:inline;'>";
+            content += "<input type='hidden' name='fileName' value='" + name + "'>";
+            content += "<input type='text' name='newName' placeholder='New name'>";
+            content += "<button type='submit'>Rename</button>";
+            content += "</form>";
 
-			content += "<form action='/move' method='post' style='display:inline;'>";
-			content += "<input type='hidden' name='fileName' value='" + name + "'>";
-			content += "<input type='text' name='newPath' placeholder='New path'>";
-			content += "<button type='submit'>Move</button>";
-			content += "</form>";
+            content += "<form action='/move' method='post' style='display:inline;'>";
+            content += "<input type='hidden' name='fileName' value='" + name + "'>";
+            content += "<input type='text' name='newPath' placeholder='New path'>";
+            content += "<button type='submit'>Move</button>";
+            content += "</form>";
 
-			content += "<form action='/delete' method='post' style='display:inline;'>";
-			content += "<input type='hidden' name='fileName' value='" + name + "'>";
-			content += "<button type='submit'>Delete</button>";
-			content += "</form>";
+            content += "<form action='/delete' method='post' style='display:inline;'>";
+            content += "<input type='hidden' name='fileName' value='" + name + "'>";
+            content += "<button type='submit'>Delete</button>";
+            content += "</form>";
 
-			content += "<form action='/download' method='post' style='display:inline;'>";
-			content += "<input type='hidden' name='fileName' value='" + name + "'>";
-			content += "<button type='submit'>Download</button>";
-			content += "</form>";
-		}
-	}
-	content += "</body></html>";
+            content += "<form action='/download' method='post' style='display:inline;'>";
+            content += "<input type='hidden' name='fileName' value='" + name + "'>";
+            content += "<button type='submit'>Download</button>";
+            content += "</form>";
+        }
+    }
+    content += "</body></html>";
 
     string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
                     to_string(content.length()) + "\r\n\r\n";
@@ -1227,7 +1293,7 @@ string renderEmailPage(string username, string item, int currentClientNumber)
     }
     else
     {
-        string encodedMessage = getEmailContent(item, currentClientNumber , username);
+        string encodedMessage = getEmailContent(item, currentClientNumber, username);
         vector<char> decodedEmailVector = base64Decode(encodedMessage);
         string decodedEmail(decodedEmailVector.begin(), decodedEmailVector.end());
         printf("encoded email is %s\n", encodedMessage.c_str());
@@ -1533,8 +1599,11 @@ void *thread_worker(void *fd)
                     // request to get menu webpage
                     if (reply_code == MENU)
                     {
+                        printf("request for menu\n");
                         tuple<string, string> credentials = parseLoginData(string(content));
+                        printf("username is %s\n", get<0>(credentials).c_str());
                         username = get<0>(credentials);
+                        printf("got username\n");
                         string password = get<1>(credentials);
 
                         DEBUG ? printf("Trying to connect to Backend\n") : 0;
@@ -1553,20 +1622,21 @@ void *thread_worker(void *fd)
 
                     else if (reply_code == SIGNUP)
                     {
-                        // wow
+
                         tuple<string, string> credentials = parseLoginData(string(content));
                         username = get<0>(credentials);
                         string password = get<1>(credentials);
 
                         connectToBackend(username, currentClientNumber);
-
+                        vector<char> passwordVector(password.begin(), password.end());
+                        string passwordEncoded = base64Encode(passwordVector);
                         // PUT username,password,passwordValue
-                        string command = "PUT " + username + ",password," + password + "\r\n";
+                        string command = "PUT " + username + ",password," + passwordEncoded + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
 
                         DEBUG ? printf("Sent command to server\n") : 0;
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
                         reply_code = REDIRECT;
@@ -1586,10 +1656,10 @@ void *thread_worker(void *fd)
                         // CPUT username,password,oldPasswordValue,newPasswordValue
                         string command = "CPUT " + username + ",password," + oldpass + "," + newpass + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
 
                         DEBUG ? printf("Sent command to server\n") : 0;
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                     }
                     // send or reply email
@@ -1610,6 +1680,7 @@ void *thread_worker(void *fd)
                     // forward email
                     else if (reply_code == FORWARD)
                     {
+                        printf("in forward\n");
                         map<string, string> msg_map = parseQuery(string(content));
                         string to = msg_map["to"];
                         string emailIdEndoded = msg_map["email_id"];
@@ -1622,15 +1693,20 @@ void *thread_worker(void *fd)
                         }
                         // first query for this email
                         string command = "GET " + emailId + "\r\n";
-                        sendToBackendSocket(currentClientNumber, command , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+                        // wow
+                        string prefix = "+OK ";
+                        response = response.substr(prefix.length());
                         vector<char> responseVec = base64Decode(response);
                         string responseDecoded(responseVec.begin(), responseVec.end());
                         DEBUG ? printf("Response decoded : %s \n", responseDecoded.c_str()) : 0;
-                        string subject = "blank";
-                        string message = "message";
+
+                        std::string subject, message;
+                        std::tie(subject, message) = extractSubjectAndMessage(responseDecoded);
+                        DEBUG ? printf("subject is : |%s| message is |%s|\n", subject.c_str(), message.c_str()) : 0;
                         mailMessage(username, to, subject, message);
                     }
 
@@ -1638,16 +1714,36 @@ void *thread_worker(void *fd)
                     {
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
+                        string fpath = fname;
+                        if (item.size() != 0)
+                        {
+                            fpath = item + "/" + fname;
+                        }
                         if (DEBUG)
                         {
                             fprintf(stderr, "fname: %s\n", fname.c_str());
                         }
                         // Delete username,/content/bongo/spaceflare.jpg
-                        string command = "DELETE " + username + ",/content/" + fname + "\r\n";
+
+                        string command = "LIST " + username + ",/content/" + fpath + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+
+                        std::istringstream iss(response);
+                        std::string line;
+                        while (std::getline(iss, line))
+                        {
+                            if (line.size() > 0)
+                            {
+                                command = "DELETE " + username + "," + line + "\r\n";
+                                DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
+                                sendToBackendSocket(currentClientNumber, command, username);
+                                response = readFromBackendSocket(currentClientNumber, username);
+                                DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+                            }
+                        }
                     }
 
                     else if (reply_code == RENAME)
@@ -1667,10 +1763,10 @@ void *thread_worker(void *fd)
                         {
                             fprintf(stderr, "fname: %s\nnew_fname: %s\n", fname.c_str(), new_fname.c_str());
                         }
-                        string command = "GET " + username + ",/content/" + fpath + "\r\n";
+                        string command = "GET " + username + ",/content/" + fpath;
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                         DEBUG ? printf("Response: %.100s \n", response.substr(0, 200).c_str()) : 0;
 
                         // remove +OK
@@ -1679,14 +1775,15 @@ void *thread_worker(void *fd)
 
                         command = "PUT " + username + ",/content/" + new_fpath + "," + response;
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
-                        response = readFromBackendSocket(currentClientNumber , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
+                        response = readFromBackendSocket(currentClientNumber, username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-                        command = "DELETE " + username + ",/content/" + fpath + "\r\n";
+                        // DELETe amuffin,/content/test-1-3.pdf
+                        command = "DELETE " + username + ",/content/" + fpath;
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
-                        response = readFromBackendSocket(currentClientNumber , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
+                        response = readFromBackendSocket(currentClientNumber, username);
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                     }
 
@@ -1705,6 +1802,7 @@ void *thread_worker(void *fd)
                         if (DEBUG)
                         {
                             fprintf(stderr, "fname: %s\nnew_path: %s\n", fname.c_str(), new_path.c_str());
+                            fprintf(stderr, "fpath: %s\nnew_fpath: %s\n", fpath.c_str(), new_fpath.c_str());
                         }
                         int isFolder = (fname.find('.') == std::string::npos);
                         if (isFolder)
@@ -1712,8 +1810,8 @@ void *thread_worker(void *fd)
                             // LIST cally,/content or LIST cally,/content/butterflyFour
                             string command = "LIST " + username + ",/content/" + fpath + "\r\n";
                             DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                            sendToBackendSocket(currentClientNumber, command , username);
-                            string response = readFromBackendSocket(currentClientNumber , username);
+                            sendToBackendSocket(currentClientNumber, command, username);
+                            string response = readFromBackendSocket(currentClientNumber, username);
                             DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
                             stringstream ss(response);
@@ -1733,22 +1831,24 @@ void *thread_worker(void *fd)
                                     // GET cally,/content/butterflyFour/filename.txt
                                     // PUT cally,/content/newpath,valuethatweGot
                                     // DELETE cally,/content/butterflyFour/filename.txt
-                                    command = "GET " + username + "," + line + "\r\n";
+                                    string command = "GET " + username + ",/content/" + fpath + "\r\n";
                                     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                                    sendToBackendSocket(currentClientNumber, command , username);
-                                    response = readFromBackendSocket(currentClientNumber , username);
+                                    sendToBackendSocket(currentClientNumber, command, username);
+                                    string response = readFromBackendSocket(currentClientNumber, username);
                                     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-                                    command = "PUT " + username + "," + new_fpath + "," + response;
+                                    string prefix = "+OK ";
+                                    response = response.substr(prefix.length());
+                                    command = "PUT " + username + ",/content/" + new_fpath + "/" + fname + "," + response;
                                     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                                    sendToBackendSocket(currentClientNumber, command , username);
-                                    response = readFromBackendSocket(currentClientNumber , username);
+                                    sendToBackendSocket(currentClientNumber, command, username);
+                                    response = readFromBackendSocket(currentClientNumber, username);
                                     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-                                    command = "DELETE " + username + "," + line + "\r\n";
+                                    command = "DELETE " + username + ",/content/" + fpath + "\r\n";
                                     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                                    sendToBackendSocket(currentClientNumber, command , username);
-                                    response = readFromBackendSocket(currentClientNumber , username);
+                                    sendToBackendSocket(currentClientNumber, command, username);
+                                    response = readFromBackendSocket(currentClientNumber, username);
                                     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                                 }
                             }
@@ -1758,20 +1858,22 @@ void *thread_worker(void *fd)
                             // in this case it's file that we're trying to move
                             string command = "GET " + username + ",/content/" + fpath + "\r\n";
                             DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                            sendToBackendSocket(currentClientNumber, command , username);
-                            string response = readFromBackendSocket(currentClientNumber , username);
+                            sendToBackendSocket(currentClientNumber, command, username);
+                            string response = readFromBackendSocket(currentClientNumber, username);
                             DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-                            command = "PUT " + username + "," + new_fpath + "," + response;
+                            string prefix = "+OK ";
+                            response = response.substr(prefix.length());
+                            command = "PUT " + username + ",/content/" + new_fpath + "/" + fname + "," + response;
                             DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                            sendToBackendSocket(currentClientNumber, command , username);
-                            response = readFromBackendSocket(currentClientNumber , username);
+                            sendToBackendSocket(currentClientNumber, command, username);
+                            response = readFromBackendSocket(currentClientNumber, username);
                             DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
                             command = "DELETE " + username + ",/content/" + fpath + "\r\n";
                             DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                            sendToBackendSocket(currentClientNumber, command , username);
-                            response = readFromBackendSocket(currentClientNumber , username);
+                            sendToBackendSocket(currentClientNumber, command, username);
+                            response = readFromBackendSocket(currentClientNumber, username);
                             DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                         }
                     }
@@ -1785,11 +1887,15 @@ void *thread_worker(void *fd)
                         {
                             fprintf(stderr, "dirname: %s\n", dirname.c_str());
                         }
-                        string command = "PUT " + username + ",/content" + dirpath + "," + "dummyData" + "\r\n";
+                        string command = "PUT " + username + ",/content/" + dirpath + "," + "dummyData" + "\r\n";
+                        if (item.size() == 0)
+                        {
+                            command = "PUT " + username + ",/content" + dirpath + "," + "dummyData" + "\r\n";
+                        }
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
                         DEBUG ? printf("Sent command to server\n") : 0;
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                     }
 
                     else if (reply_code == UPLOAD)
@@ -1814,10 +1920,10 @@ void *thread_worker(void *fd)
                         printf(" the size of data is %ld\n", fdata.size());
                         string command = "PUT " + username + ",/content/" + fpath + "," + fdataString + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 100).c_str(), backend_socks[currentClientNumber].socket) : 0;
-                        sendToBackendSocket(currentClientNumber, command , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
 
                         DEBUG ? printf("Sent command to server\n") : 0;
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                         // DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
                         //  need to get complete path
                         contentType = "";
@@ -1842,9 +1948,9 @@ void *thread_worker(void *fd)
                         DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
 
                         // NOTE: to send the actual binary data retrieved from the backend, use
-                        sendToBackendSocket(currentClientNumber, command , username);
+                        sendToBackendSocket(currentClientNumber, command, username);
                         printf("sent to backend socket\n");
-                        string response = readFromBackendSocket(currentClientNumber , username);
+                        string response = readFromBackendSocket(currentClientNumber, username);
                         string prefix = "+OK ";
                         response = response.substr(prefix.length());
                         string responseDecoded = base64DecodeString(response);
@@ -1989,7 +2095,7 @@ void *thread_worker(void *fd)
                     }
 
                     // drive page
-                    else if (strncmp(url, "/drive", strlen("/drive")) == 0) 
+                    else if (strncmp(url, "/drive", strlen("/drive")) == 0)
                     {
                         reply_code = DRIVE;
                         item = extractPath(string(url));
