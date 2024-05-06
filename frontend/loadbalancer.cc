@@ -18,8 +18,8 @@
 
 using namespace std;
 
-int PORT = 8000;
-int UDPPORT = 9000;
+int PORT = 7500;
+int UDPPORT = 7600;
 int DEBUG = 0;
 size_t READ_SIZE = 5;
 const int MAX_CLIENTS = 100;

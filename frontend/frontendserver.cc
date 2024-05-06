@@ -1085,7 +1085,6 @@ string renderAdminPage()
 
     return reply;
 }
-
 // render the login webpage
 string renderLoginPage(string sid)
 {
@@ -1093,27 +1092,47 @@ string renderLoginPage(string sid)
     string content = "";
     content += "<html>\n";
     content += "<head><title>Login Page</title></head>\n";
-    content += "<body>\n";
-    content += "<h1>PennCloud Login</h1>\n";
+    content += "<body style='font-family: Arial, sans-serif; background-color: #f0f0f0; text-align: center; padding-top: 50px;'>\n";
+    content += "<h1 style='color: #333;'>PennCloud Login</h1>\n";
+    content += "<div style='background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>\n";
     content += "<h2>Log in</h2>\n";
     content += "<form action=\"/menu\" method=\"post\">\n";
-    content += "Username: <input type=\"text\" name=\"username\"><br>\n";
-    content += "Password: <input type=\"password\" name=\"password\"><br>\n";
-    content += "<input type=\"submit\" value=\"Submit\">\n";
+    content += "Username: <input type=\"text\" name=\"username\" style='margin-bottom: 10px; width: 95%;'><br>\n";
+    content += "Password: <input type=\"password\" name=\"password\" style='margin-bottom: 10px; width: 95%;'><br>\n";
+    content += "<input type=\"submit\" value=\"Submit\" style='width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>\n";
     content += "</form>\n";
+    content += "</div>\n";
+    content += "<p><a href=\"#\" onclick='toggleDisplay(\"signup\", \"changepass\")' style='color: blue; cursor: pointer;'>Sign Up</a></p>\n";
+    content += "<p><a href=\"#\" onclick='toggleDisplay(\"changepass\", \"signup\")' style='color: blue; cursor: pointer;'>Change Password</a></p>\n";
+    content += "<div id='signup' style='display: none; background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>\n";
     content += "<h2>Sign Up</h2>\n";
     content += "<form action=\"/signup\" method=\"post\">\n";
-    content += "Username: <input type=\"text\" name=\"username\"><br>\n";
-    content += "Password: <input type=\"password\" name=\"password\"><br>\n";
-    content += "<input type=\"submit\" value=\"Submit\">\n";
+    content += "Username: <input type=\"text\" name=\"username\" style='margin-bottom: 10px; width: 95%;'><br>\n";
+    content += "Password: <input type=\"password\" name=\"password\" style='margin-bottom: 10px; width: 95%;'><br>\n";
+    content += "<input type=\"submit\" value=\"Submit\" style='width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>\n";
     content += "</form>\n";
+    content += "</div>\n";
+    content += "<div id='changepass' style='display: none; background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>\n";
     content += "<h2>Change Password</h2>\n";
     content += "<form action=\"/newpass\" method=\"post\">\n";
-    content += "Username: <input type=\"text\" name=\"username\"><br>\n";
-    content += "Old Password: <input type=\"text\" name=\"oldpass\"><br>\n";
-    content += "New Password: <input type=\"text\" name=\"newpass\"><br>\n";
-    content += "<input type=\"submit\" value=\"Submit\">\n";
+    content += "Username: <input type=\"text\" name=\"username\" style='margin-bottom: 10px; width: 95%;'><br>\n";
+    content += "Old Password: <input type=\"text\" name=\"oldpass\" style='margin-bottom: 10px; width: 95%;'><br>\n";
+    content += "New Password: <input type=\"text\" name=\"newpass\" style='margin-bottom: 10px; width: 95%;'><br>\n";
+    content += "<input type=\"submit\" value=\"Submit\" style='width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>\n";
     content += "</form>\n";
+    content += "</div>\n";
+    content += "<script>\n";
+    content += "function toggleDisplay(showId, hideId) {\n";
+    content += "  var showElement = document.getElementById(showId);\n";
+    content += "  var hideElement = document.getElementById(hideId);\n";
+    content += "  if (showElement.style.display === 'none') {\n";
+    content += "    showElement.style.display = 'block';\n";
+    content += "    hideElement.style.display = 'none';\n";
+    content += "  } else {\n";
+    content += "    showElement.style.display = 'none';\n";
+    content += "  }\n";
+    content += "}\n";
+    content += "</script>\n";
     content += "</body>\n";
     content += "</html>\n";
 
@@ -1126,15 +1145,24 @@ string renderLoginPage(string sid)
     return reply;
 }
 
-// render the menu webpage
+
+// render menu page
 string renderMenuPage(string username)
 {
-
     string content = "";
-    content += "<html><body><h1>Menu</h1><ul>";
-    content += "<li><a href='/mailbox'>Mailbox</a></li>";
-    content += "<li><a href='/drive'>Drive</a></li>";
-    content += "</ul></body></html>";
+    content += "<html>\n";
+    content += "<head><title>Menu</title></head>\n";
+    content += "<body style='font-family: Arial, sans-serif; background-color: #f0f0f0; text-align: center; padding-top: 50px;'>\n";
+    content += "<h1 style='color: #333;'>Welcome, " + username + "!</h1>\n";
+    content += "<div style='background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center;'>\n";
+    content += "<ul style='list-style: none; padding: 0;'>\n";
+    content += "<li style='margin: 10px 0;'><button onclick=\"window.location.href='/mailbox'\" style='width: 90%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>Mailbox</button></li>\n";
+    content += "<li style='margin: 10px 0;'><button onclick=\"window.location.href='/drive'\" style='width: 90%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>Drive</button></li>\n";
+    content += "</ul>\n";
+    content += "</div>\n";
+    content += "<button onclick=\"window.location.href='/'\" style='margin-top: 20px; padding: 10px; width: 300px; background-color: #f44336; color: white; border: none; cursor: pointer;'>Sign Out</button>\n";
+    content += "</body>\n";
+    content += "</html>\n";
 
     string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
                     to_string(content.length()) + "\r\n\r\n";
@@ -1630,6 +1658,9 @@ void *thread_worker(void *fd)
                         connectToBackend(username, currentClientNumber);
                         vector<char> passwordVector(password.begin(), password.end());
                         string passwordEncoded = base64Encode(passwordVector);
+
+                        cout<<"ORIGINAL PASS = "<< passwordEncoded<<endl;
+
                         // PUT username,password,passwordValue
                         string command = "PUT " + username + ",password," + passwordEncoded + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
@@ -1649,6 +1680,14 @@ void *thread_worker(void *fd)
                         string username = msg_map["username"];
                         string oldpass = msg_map["oldpass"];
                         string newpass = msg_map["newpass"];
+
+                        oldpass = base64Encode(vector<char>(oldpass.begin(),oldpass.end()));
+                        newpass = base64Encode(vector<char>(newpass.begin(),newpass.end()));
+
+                        cout<<"CPUT RECD"<<endl;
+                        cout<<oldpass<<endl;
+                        cout<<newpass<<endl;
+                        cout<<to_string(oldpass==newpass)<<endl;
 
                         connectToBackend(username, currentClientNumber);
 
@@ -1763,7 +1802,7 @@ void *thread_worker(void *fd)
                         {
                             fprintf(stderr, "fname: %s\nnew_fname: %s\n", fname.c_str(), new_fname.c_str());
                         }
-                        string command = "GET " + username + ",/content/" + fpath;
+                        string command = "GET " + username + ",/content/" + fpath + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
                         sendToBackendSocket(currentClientNumber, command, username);
                         string response = readFromBackendSocket(currentClientNumber, username);
@@ -1780,7 +1819,7 @@ void *thread_worker(void *fd)
                         DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
                         // DELETe amuffin,/content/test-1-3.pdf
-                        command = "DELETE " + username + ",/content/" + fpath;
+                        command = "DELETE " + username + ",/content/" + fpath + "\r\n";
                         DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
                         sendToBackendSocket(currentClientNumber, command, username);
                         response = readFromBackendSocket(currentClientNumber, username);
@@ -1864,7 +1903,7 @@ void *thread_worker(void *fd)
 
                             string prefix = "+OK ";
                             response = response.substr(prefix.length());
-                            command = "PUT " + username + ",/content/" + new_fpath + "/" + fname + "," + response;
+                            command = "PUT " + username + ",/content/" + new_fpath + "," + response;
                             DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
                             sendToBackendSocket(currentClientNumber, command, username);
                             response = readFromBackendSocket(currentClientNumber, username);
@@ -1944,7 +1983,14 @@ void *thread_worker(void *fd)
                         string filename = contentStr.substr(pos + 1);
                         string downloadLocation = "/home/cis5050/Downloads/" + contentStr.substr(pos + 1);
                         printf("filename is %s\n", filename.c_str());
-                        string command = "GET " + username + ",/content/" + contentStr.substr(pos + 1) + "\r\n";
+                        string filepath = "";
+                        if (item.size() == 0){
+                            filepath = filename;
+                        } else {
+                            filepath = item + "/" + filename;
+                        }
+                        cout<<"FILEPATH=" << filepath<<endl;
+                        string command = "GET " + username + ",/content/" + filepath + "\r\n";
                         DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
 
                         // NOTE: to send the actual binary data retrieved from the backend, use
@@ -1952,6 +1998,7 @@ void *thread_worker(void *fd)
                         printf("sent to backend socket\n");
                         string response = readFromBackendSocket(currentClientNumber, username);
                         string prefix = "+OK ";
+                        cout << "Response.size() -> " << response.size() << endl;
                         response = response.substr(prefix.length());
                         string responseDecoded = base64DecodeString(response);
                         send_file_data(sock, downloadLocation, responseDecoded.size(), &responseDecoded[0]);

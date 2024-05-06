@@ -118,7 +118,6 @@ long long sendStringOverSocket(int sock, const string& command) {
 
     return count;
 }
-
 string readFromSocket(int sock, int expectNumberOfBytesToRead) {
     const int bufferSize = BUFFER_SIZE;
     char buffer[BUFFER_SIZE];
@@ -315,7 +314,7 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 handleAppend(appendCommand);
             }
         } else {
-            msg = "-ERR Invalid PUT parameters\r\n";
+            msg = "-ERR Invalidp PUT parameters\r\n";
         }
     } else if (parameters[0] == "GET ") {
         if (parameters.size() == 3) {
@@ -336,6 +335,7 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 string col = parameters[2];
                 string currentValue = parameters[3];
                 string newValue = parameters[4];
+
                 if (table[row][col] == currentValue) {
                     table[row][col] = newValue;
                     msg = "+OK\r\n";
