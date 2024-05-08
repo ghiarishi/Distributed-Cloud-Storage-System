@@ -118,7 +118,6 @@ long long sendStringOverSocket(int sock, const string& command) {
 
     return count;
 }
-
 string readFromSocket(int sock, int expectNumberOfBytesToRead) {
     const int bufferSize = BUFFER_SIZE;
     char buffer[BUFFER_SIZE];
@@ -161,7 +160,8 @@ string readAndWriteFromSocket(int sock, const string &command) {
 // Function to forward request to all secondary servers (only alive servers)
 bool forwardToAllSecondaryServers(string command) {
     printDebug("Forwarding a command of size: " + to_string(command.size()) + " :to all secondary servers");
-    
+    string temp = command.size() > 1000 ? command.substr(0,1000) : command;
+    printDebug("Forwarding a command 1000 : " + temp + " : to all secondary servers");
     auto& serverList = servers[myInfo.replicaGroup]; 
     
     for (auto it = serverList.begin(); it != serverList.end(); ++it) {
@@ -314,7 +314,7 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 handleAppend(appendCommand);
             }
         } else {
-            msg = "-ERR Invalid PUT parameters\r\n";
+            msg = "-ERR Invalidp PUT parameters\r\n";
         }
     } else if (parameters[0] == "GET ") {
         if (parameters.size() == 3) {
@@ -335,6 +335,7 @@ void handleCommand(vector<string> parameters, string &msg, string command = "", 
                 string col = parameters[2];
                 string currentValue = parameters[3];
                 string newValue = parameters[4];
+
                 if (table[row][col] == currentValue) {
                     table[row][col] = newValue;
                     msg = "+OK\r\n";
@@ -791,6 +792,7 @@ void adminConsoleSignalHandler() {
                                 count++;
                             }
                         }
+                        response += "\r\n";
                     } else if (temp == "GET ") {
                         if (commands.size() == 3) {
                             string row = commands[1];
@@ -897,6 +899,8 @@ void* threadFunc(void* arg) {
                 // Assuming next char is '\n', check boundary
                 if (i + 1 < bytesRead && buffer[i + 1] == '\n') {
                     printDebug("Command received: " + to_string(command.size()));
+                    string temp = command.size() > 1000 ? command.substr(0,1000) : command;
+                    printDebug("First 1000 characters in command : " + temp);
 
                     vector<string> parameters = splitKVStoreCommand(command);
 
