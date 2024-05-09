@@ -20,6 +20,7 @@
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
 #include <openssl/evp.h>
+#include <iomanip>
 
 using namespace std;
 
@@ -312,6 +313,20 @@ pair<string, int> extractIPAndPort(const string &serverInfo)
     return result;
 }
 
+std::string urlEncode(const std::string &value) {
+    std::ostringstream encodedStream;
+    encodedStream << std::hex << std::uppercase;
+    
+    for (char ch : value) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            encodedStream << ch;
+        } else {
+            encodedStream << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(static_cast<unsigned char>(ch));
+        }
+    }
+
+    return encodedStream.str();
+}
 /////////////////////////////////////
 //                                 //
 //           Utilities             //
@@ -381,6 +396,32 @@ string base64DecodeString(const string &encoded_data)
 
 string base64Encode(const vector<char> &data)
 {
+    // Create a BIO object for base64 encoding
+    BIO *bio = BIO_new(BIO_s_mem());
+    BIO *base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Write data to BIO
+    BIO_write(bio, data.data(), data.size());
+    BIO_flush(bio);
+
+    // Get the encoded data
+    BUF_MEM *bio_buf;
+    BIO_get_mem_ptr(bio, &bio_buf);
+
+    // Convert the encoded data to a std::string
+    std::string encoded_data(bio_buf->data, bio_buf->length);
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return encoded_data;
+}
+
+string base64Encode(const string &dataString)
+{
+    vector<char> data(dataString.begin(), dataString.end());
     // Create a BIO object for base64 encoding
     BIO *bio = BIO_new(BIO_s_mem());
     BIO *base64 = BIO_new(BIO_f_base64());
@@ -958,12 +999,9 @@ int connectToMail()
 int authenticate(string username, string password, int currentClient)
 {
     string command = "GET " + username + ",password\r\n";
-
     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClient].socket) : 0;
     sendToBackendSocket(currentClient, command, username);
-
     DEBUG ? printf("Sent command to server\n") : 0;
-
     string response = readFromBackendSocket(currentClient, username);
     string rightPasswordEncoded = extractPassword(response);
     string decodedPassword = base64DecodeString(rightPasswordEncoded);
@@ -1602,27 +1640,28 @@ void *thread_worker(void *fd)
                     memcpy(content, dataBuffer, contentlen);
                     content[contentlen] = '\0';
 
+                    //TODO uncomment if statement
                     // process the message body
-                    if (DEBUG)
-                    {
-                        // fprintf(stderr, "[%d] C: %s\n", sock, content);
-                        // fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
-                        for (int c = 0; c < contentlen; c++)
-                        {
-                            char c_tmp[1];
-                            strncpy(c_tmp, content + c, 1);
-                            c_tmp[1] = '\0';
-                            fprintf(stderr, "%s", c_tmp);
+                    // if (DEBUG)
+                    // {
+                    //     // fprintf(stderr, "[%d] C: %s\n", sock, content);
+                    //     // fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
+                    //     for (int c = 0; c < contentlen; c++)
+                    //     {
+                    //         char c_tmp[1];
+                    //         strncpy(c_tmp, content + c, 1);
+                    //         c_tmp[1] = '\0';
+                    //         fprintf(stderr, "%s", c_tmp);
 
-                            // break for message body that's too long
-                            if (c >= 2048)
-                            {
-                                fprintf(stderr, "\n..............\n");
-                                break;
-                            }
-                        }
-                        fprintf(stderr, "\n");
-                    }
+                    //         // break for message body that's too long
+                    //         if (c >= 2048)
+                    //         {
+                    //             fprintf(stderr, "\n..............\n");
+                    //             break;
+                    //         }
+                    //     }
+                    //     fprintf(stderr, "\n");
+                    // }
 
                     // request to get menu webpage
                     if (reply_code == MENU)
@@ -1656,10 +1695,9 @@ void *thread_worker(void *fd)
                         string password = get<1>(credentials);
 
                         connectToBackend(username, currentClientNumber);
-                        vector<char> passwordVector(password.begin(), password.end());
-                        string passwordEncoded = base64Encode(passwordVector);
-
-                        cout<<"ORIGINAL PASS = "<< passwordEncoded<<endl;
+                        string passwordEncoded = base64Encode(password);
+                        DEBUG ? printf("ORIGINAL PASS = %s\n", password.c_str()) : 0;
+                        DEBUG ? printf("ENCODED PASS = %s\n", passwordEncoded.c_str()) : 0;
 
                         // PUT username,password,passwordValue
                         string command = "PUT " + username + ",password," + passwordEncoded + "\r\n";
@@ -1676,18 +1714,25 @@ void *thread_worker(void *fd)
 
                     else if (reply_code == NEWPASS)
                     {
+                        DEBUG ? printf("IN NEWPASS \n") : 0;
                         map<string, string> msg_map = parseQuery(string(content));
                         string username = msg_map["username"];
                         string oldpass = msg_map["oldpass"];
                         string newpass = msg_map["newpass"];
-
-                        oldpass = base64Encode(vector<char>(oldpass.begin(),oldpass.end()));
-                        newpass = base64Encode(vector<char>(newpass.begin(),newpass.end()));
-
-                        cout<<"CPUT RECD"<<endl;
-                        cout<<oldpass<<endl;
-                        cout<<newpass<<endl;
-                        cout<<to_string(oldpass==newpass)<<endl;
+                        DEBUG ? printf("OLD PASS %s\n", oldpass.c_str()) : 0;
+                        DEBUG ? printf("NEW PASS %s\n", newpass.c_str()) : 0;
+                        oldpass = urlEncode(oldpass);
+                        newpass = urlEncode(newpass);
+                        DEBUG ? printf("OLD PASS REGULAR %s\n", oldpass.c_str()) : 0;
+                        DEBUG ? printf("NEW PASS REGULAR %s\n", newpass.c_str()) : 0;
+                        oldpass = base64Encode(vector<char>(oldpass.begin(), oldpass.end()));
+                        newpass = base64Encode(vector<char>(newpass.begin(), newpass.end()));
+                        DEBUG ? printf("OLD PASS DECODED %s\n", oldpass.c_str()) : 0;
+                        DEBUG ? printf("NEW PASS DECODED %s\n", newpass.c_str()) : 0;
+                        cout << oldpass << endl;
+                        cout << newpass << endl;
+                        cout << to_string(oldpass == newpass) << endl;
+                        
 
                         connectToBackend(username, currentClientNumber);
 
@@ -1984,12 +2029,15 @@ void *thread_worker(void *fd)
                         string downloadLocation = "/home/cis5050/Downloads/" + contentStr.substr(pos + 1);
                         printf("filename is %s\n", filename.c_str());
                         string filepath = "";
-                        if (item.size() == 0){
+                        if (item.size() == 0)
+                        {
                             filepath = filename;
-                        } else {
+                        }
+                        else
+                        {
                             filepath = item + "/" + filename;
                         }
-                        cout<<"FILEPATH=" << filepath<<endl;
+                        cout << "FILEPATH=" << filepath << endl;
                         string command = "GET " + username + ",/content/" + filepath + "\r\n";
                         DEBUG ? printf("Sending to frontend: %s\n", command.c_str()) : 0;
 
@@ -2014,7 +2062,8 @@ void *thread_worker(void *fd)
                         send(sock, reply, strlen(reply), 0);
                         if (DEBUG)
                         {
-                            fprintf(stderr, "[%d] S: %s\n", sock, reply);
+                            // TODO Need to uncomment
+                            //fprintf(stderr, "[%d] S: %s\n", sock, reply);
                         }
                     }
 
@@ -2041,7 +2090,8 @@ void *thread_worker(void *fd)
                 cmd[cmdLen] = '\0';
                 if (DEBUG)
                 {
-                    fprintf(stderr, "[%d] C: %s\n", sock, cmd);
+                    // TODO : Need to uncomment 5/8
+                    // fprintf(stderr, "[%d] C: %s\n", sock, cmd);
                 }
 
                 // Reading Header lines
@@ -2107,7 +2157,8 @@ void *thread_worker(void *fd)
                             send(sock, reply, strlen(reply), 0);
                             if (DEBUG)
                             {
-                                fprintf(stderr, "[%d] S: %s\n", sock, reply);
+                                //TODO need to uncomment
+                                //fprintf(stderr, "[%d] S: %s\n", sock, reply);
                             }
                         }
                     }
@@ -2251,7 +2302,8 @@ void *thread_worker(void *fd)
                     send(sock, unkCmd, strlen(unkCmd), 0);
                     if (DEBUG)
                     {
-                        fprintf(stderr, "[%d] S: %s", sock, unkCmd);
+                        //TODO need to uncomment
+                       //fprintf(stderr, "[%d] S: %s", sock, unkCmd);
                     }
                 }
 
@@ -2276,7 +2328,8 @@ void *thread_worker(void *fd)
             }
             if (DEBUG)
             {
-                fprintf(stderr, "[%d] Connection closed\n", sock);
+                //TODO need to uncomment
+                //fprintf(stderr, "[%d] Connection closed\n", sock);
             }
             num_client -= 1;
             pthread_exit(NULL);
@@ -2382,7 +2435,8 @@ int main(int argc, char *argv[])
 
         if (DEBUG)
         {
-            fprintf(stderr, "[%d] New Connection\n", *fd);
+            //TODO need to uncomment
+            //fprintf(stderr, "[%d] New Connection\n", *fd);
         }
 
         // record socket fd in the sockets array

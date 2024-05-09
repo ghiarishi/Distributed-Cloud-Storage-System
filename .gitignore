@@ -1,2 +1,9 @@
 .vscode
 ./backend/kvstore/storage/*
+./backend/kvstore/kvstore
+./backend/kvstore/master
+./frontend/admin
+./frontend/frontend
+./frontend/loadbalancer
+./smtp/smtpServer
+./smtp/smtpec
