@@ -22,7 +22,10 @@
 #include <openssl/evp.h>
 #include <iomanip>
 
+
 #include "frontendserver.h"
+#include "render.h"
+#include "readingHelper.h"
 
 using namespace std;
 
@@ -62,7 +65,6 @@ int DELETE = 11;
 int NEWDIR = 12;
 int UPLOAD = 13;
 
-int ADMIN = 14;
 int SIGNUP = 20;
 int NEWPASS = 21;
 
@@ -165,14 +167,6 @@ string extractPath(const string &path)
     }
 }
 
-// Get filename from the path
-string getFileName(const string &path)
-{
-    size_t pos = path.find_last_of("/\\");
-    if (pos != std::string::npos)
-        return path.substr(pos + 1);
-    return path;
-}
 
 int countOccurrences(const std::string &str, char target)
 {
@@ -187,48 +181,7 @@ int countOccurrences(const std::string &str, char target)
     return count;
 }
 
-vector<pair<string, int>> extractFiles(string username, string returnString, string directoryPath)
-{
-    vector<string> paths;
-    istringstream iss(returnString);
-    string line;
-    vector<pair<string, int>> files;
 
-    while (std::getline(iss, line))
-    {
-        // Assuming "/content/" is fixed part of the path
-        size_t startPos = line.find("/content/");
-        if (startPos != std::string::npos)
-        {
-            // Extract path starting from "/content/"
-            std::string path = line.substr(startPos + 9);
-            printf(" The path is |%s| directoryPath is |%s|\n", path.c_str(), directoryPath.c_str());
-            startPos = path.find(directoryPath);
-            string remainingText = path.substr(startPos + directoryPath.size());
-            printf("The remainingText is %s\n", remainingText.c_str());
-            if (directoryPath.size() == 0 && remainingText.find("/") == std::string::npos)
-            {
-                printf("we are adding path\n");
-                paths.push_back(path);
-            }
-            else if (directoryPath.size() != 0 && remainingText.find("/") != std::string::npos &&
-                     remainingText.find("/", remainingText.find("/") + 1) == std::string::npos)
-            {
-                printf("we are adding path\n");
-                paths.push_back(path);
-            }
-        }
-    }
-
-    for (string currPath : paths)
-    {
-        string fileName = getFileName(currPath);
-        int isFolder = (currPath.find('.') == std::string::npos);
-        pair<string, int> filePair = make_pair(fileName, isFolder);
-        files.push_back(filePair);
-    }
-    return files;
-}
 
 vector<email> extractEmails(string username, string returnString)
 {
@@ -274,20 +227,6 @@ string extractPassword(string returnString)
     return password;
 }
 
-pair<string, int> extractIPAndPort(const string &serverInfo)
-{
-    pair<std::string, int> result;
-
-    size_t ipStart = serverInfo.find(":") + 1;                  // Find the start of the IP address
-    size_t ipEnd = serverInfo.find(":", ipStart);               // Find the end of the IP address
-    result.first = serverInfo.substr(ipStart, ipEnd - ipStart); // Extract the IP address
-
-    size_t portStart = ipEnd + 1;                                                 // Find the start of the port number
-    size_t portEnd = serverInfo.find("\r\n", portStart);                          // Find the end of the port number
-    result.second = std::stoi(serverInfo.substr(portStart, portEnd - portStart)); // Extract the port number
-
-    return result;
-}
 
 std::string urlEncode(const std::string &value)
 {
@@ -428,45 +367,8 @@ string base64Encode(const string &dataString)
     return encoded_data;
 }
 
-// get backendNodes from the fileName
-vector<Node> getBackendNodes(string filename)
-{
-    vector<Node> nodes;
-    ifstream file(filename);
-    if (!file.is_open())
-    {
-        cerr << "Error opening file: " << filename << endl;
-        return nodes; // return an empty vector if file couldn't be opened
-    }
 
-    string line;
-    while (getline(file, line))
-    {
-        stringstream ss(line);
-        string token;
 
-        // Parse each line
-        int id, tcp, udp, udp2;
-        string ip;
-        getline(ss, token, ','); // id
-        id = stoi(token.substr(token.find(":") + 1));
-        getline(ss, token, ','); // ip
-        ip = token.substr(token.find(":") + 1);
-        getline(ss, token, ','); // tcp
-        tcp = stoi(token.substr(token.find(":") + 1));
-        getline(ss, token, ','); // udp
-        udp = stoi(token.substr(token.find(":") + 1));
-        getline(ss, token, ','); // udp2
-        udp2 = stoi(token.substr(token.find(":") + 1));
-
-        // Construct Node object and push it to the vector
-        nodes.emplace_back(id, ip, tcp, udp, udp2, line);
-        printf("The whole line is %s\n", line.c_str());
-    }
-
-    file.close();
-    return nodes;
-}
 // Parse login data
 tuple<string, string> parseLoginData(string data_str)
 {
@@ -716,180 +618,8 @@ string generate_cookie()
 //                                 //
 /////////////////////////////////////
 
-int connectToBackend(string username, int clientNum)
-{
-    int master_sock, backend_sock;
-    struct sockaddr_in server_addr;
 
-    // Open master socket
-    if ((master_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        std::cerr << "Error creating socket" << std::endl;
-        return -1;
-    }
 
-    // Server address
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(2000);
-    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    // Connect to server
-    if (connect(master_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-    {
-        std::cerr << "Error connecting to server" << std::endl;
-        return -1;
-    }
-
-    DEBUG ? printf("Connected to Server\n") : 0;
-
-    // Send command to server
-    string command = "GET_SERVER:" + username + "\r\n";
-    if (send(master_sock, command.c_str(), command.length(), 0) < 0)
-    {
-        std::cerr << "Error sending command to server" << std::endl;
-        return -1;
-    }
-
-    DEBUG ? printf("Sent command to Server\n") : 0;
-
-    // Receive server info
-    char serverInfo[buffer_size];
-    if (recv(master_sock, serverInfo, sizeof(serverInfo), 0) < 0)
-    {
-        std::cerr << "Error receiving response from server" << std::endl;
-        return -1;
-    }
-
-    DEBUG ? printf("Received response %s\n", serverInfo) : 0;
-    auto ipAndPort = extractIPAndPort(serverInfo);
-
-    // Connect to backend server
-    if ((backend_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        std::cerr << "Error creating socket" << std::endl;
-        return -1;
-    }
-
-    server_addr.sin_addr.s_addr = inet_addr(ipAndPort.first.c_str());
-    server_addr.sin_port = htons(ipAndPort.second);
-
-    if (connect(backend_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
-    {
-        std::cerr << "Error connecting to backend sock" << std::endl;
-        return -1;
-    }
-
-    char buffer[4096];
-    if (recv(backend_sock, buffer, sizeof(buffer), 0) < 0)
-    {
-        std::cerr << "Error receiving response from server" << std::endl;
-        return -1;
-    }
-
-    printf("Response: %s\n", buffer);
-
-    backend_socks[clientNum].ip = ipAndPort.first;
-    backend_socks[clientNum].port = ipAndPort.second;
-    backend_socks[clientNum].socket = backend_sock;
-    return 0;
-}
-
-// Helper function to send data to backend server
-bool sendToBackendSocket(int clientNumber, string command, string username)
-{
-    int backend_sock = backend_socks[clientNumber].socket;
-    if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
-    {
-        cerr << "Error sending data to backend server" << std::endl;
-        if (!connectToBackend(username, clientNumber))
-        {
-            cerr << "Failed to reconnect to backend server" << std::endl;
-            return false;
-        }
-        // Retry sending after successful reconnection
-        if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
-        {
-            cerr << "Error sending data after reconnection" << std::endl;
-            return false;
-        }
-    }
-    return true;
-}
-
-bool sendToSocket(int backend_sock, string command)
-{
-    if (send(backend_sock, command.c_str(), command.length(), 0) < 0)
-    {
-        cerr << "Error sending data to backend server" << std::endl;
-        return false;
-    }
-    return true;
-}
-
-// Helper function to read from backend socket
-string readFromBackendSocket(int clientNumber, string username)
-{
-    string response;
-    char buffer[4096];
-    int backend_sock = backend_socks[clientNumber].socket;
-
-    while (true)
-    {
-        memset(buffer, 0, sizeof(buffer));
-
-        int bytesReceived = recv(backend_sock, buffer, sizeof(buffer), 0);
-        if (bytesReceived < 0)
-        {
-            cerr << "Error receiving response from server" << std::endl;
-            if (!connectToBackend(username, clientNumber))
-            {
-                cerr << "Failed to reconnect to backend server" << std::endl;
-                return "";
-            }
-            continue; // Retry reading after successful reconnection
-        }
-
-        response.append(buffer, bytesReceived);
-
-        size_t found = response.find("\r\n");
-        if (found != std::string::npos)
-        {
-            break;
-        }
-    }
-
-    return response;
-}
-
-string readFromSocket(int backend_sock)
-{
-    string response;
-    char buffer[4096];
-
-    while (true)
-    {
-        memset(buffer, 0, sizeof(buffer));
-
-        int bytesReceived = recv(backend_sock, buffer, sizeof(buffer), 0);
-        if (bytesReceived < 0)
-        {
-            cerr << "Error receiving response from server" << std::endl;
-            return "";
-        }
-        // printf("the buffer is %s\n", buffer);
-
-        response.append(buffer, bytesReceived);
-
-        // Check if "\r\n" is present in the received data
-        size_t found = response.find("\r\n");
-        if (found != std::string::npos)
-        {
-            break; // Exit loop if "\r\n" is found
-        }
-    }
-
-    return response;
-}
 
 void mailMessage(string username, string to, string subject, string message)
 {
@@ -1043,37 +773,7 @@ string getEmailContent(string emailID, int currentClientNumber, string username)
 
     return encodedMessage;
 }
-// retrieve files/folders in drive (0 for file, 1 for folder)
-vector<pair<string, int>> get_drive(string username, int currentClientNumber, string dir_path)
-{
-    // pair<string, int> f1 = make_pair("document_1.txt", 0);
-    // pair<string, int> f2 = make_pair("image_1.png", 0);
-    // pair<string, int> d1 = make_pair("folder_1", 1);
-    // vector<pair<string, int>> files = {f1, f2, d1};
-    printf("dir path is : %s\n", dir_path.c_str());
-    string command = "LIST " + username + ",/content/" + dir_path + "\r\n";
-    DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
-    sendToBackendSocket(currentClientNumber, command, username);
 
-    string response = readFromBackendSocket(currentClientNumber, username);
-    DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
-
-    vector<pair<string, int>> files = extractFiles(username, response, dir_path);
-
-    string target_entry = dir_path;
-    files.erase(std::remove_if(files.begin(), files.end(), [&](const pair<string, int> &file)
-                               { return file.first == target_entry; }),
-                files.end());
-
-    DEBUG ? printf("The files we have are  \n") : 0;
-    for (const auto &pair : files)
-    {
-        std::cout << "(" << pair.first << ", " << pair.second << ")" << std::endl;
-    }
-    DEBUG ? printf("\n") : 0;
-
-    return files;
-}
 
 /////////////////////////////////////
 //                                 //
@@ -1081,234 +781,15 @@ vector<pair<string, int>> get_drive(string username, int currentClientNumber, st
 //                                 //
 /////////////////////////////////////
 
-// redirect to the user's menu page
-string redirectReply()
-{
-    string response = "HTTP/1.1 302 Found\r\nLocation: /\r\n\r\n\r\n";
-    return response;
-}
 
-// Render Admin Page
-string renderAdminPage()
-{
-    printf("calling get backend nodes\n");
-    vector<Node> backendNodes = getBackendNodes("../backend/kvstore/config.txt");
 
-    string content = "";
-    content += "<html>\n";
-    content += "<head><title>Admin Console</title></head>\n";
-    content += "<body>\n";
-    content += "<h1>Admin Console</h1>\n";
 
-    // Display backend nodes
-    content += "<h2>Backend Nodes</h2>\n";
-    content += "<ul>\n";
-    for (const Node &node : backendNodes)
-    {
-        content += "<li>" + node.name + " - Status: " + (node.isAlive ? "Alive" : "Down") + " ";
-        // Add buttons for each node
-        content += "<form action=\"/action\" method=\"post\">";
-        content += "<input type=\"hidden\" name=\"node_name\" value=\"" + node.name + "\">";
-        content += "<input type=\"submit\" name=\"action\" value=\"Disable\">";
-        content += "<input type=\"submit\" name=\"action\" value=\"Restart\">";
-        content += "</form>";
-        content += "</li>\n";
-    }
-    content += "</ul>\n";
 
-    string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\n\r\n";
-    string reply = header + content;
 
-    return reply;
-}
-// render the login webpage
-string renderLoginPage(string sid, string errorMessage = "")
-{
-    string content = "";
-    content += "<html>\n";
-    content += "<head><title>Login Page</title></head>\n";
-    content += "<body style='font-family: Arial, sans-serif; background-color: #f0f0f0; text-align: center; padding-top: 50px;'>\n";
-    content += "<h1 style='color: #333;'>PennCloud Login</h1>\n";
-    content += "<div style='background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>\n";
-    content += "<h2>Log in</h2>\n";
-    if (!errorMessage.empty())
-    {
-        content += "<p style='color: red;'>" + errorMessage + "</p>\n";
-    }
-    content += "<form action=\"/menu\" method=\"post\">\n";
-    content += "Username: <input type=\"text\" name=\"username\" style='margin-bottom: 10px; width: 95%;'><br>\n";
-    content += "Password: <input type=\"password\" name=\"password\" style='margin-bottom: 10px; width: 95%;'><br>\n";
-    content += "<input type=\"submit\" value=\"Submit\" style='width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>\n";
-    content += "</form>\n";
-    content += "</div>\n";
-    content += "<p><a href=\"#\" onclick='toggleDisplay(\"signup\", \"changepass\")' style='color: blue; cursor: pointer;'>Sign Up</a></p>\n";
-    content += "<p><a href=\"#\" onclick='toggleDisplay(\"changepass\", \"signup\")' style='color: blue; cursor: pointer;'>Change Password</a></p>\n";
-    content += "<div id='signup' style='display: none; background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>\n";
-    content += "<h2>Sign Up</h2>\n";
-    content += "<form action=\"/signup\" method=\"post\">\n";
-    content += "Username: <input type=\"text\" name=\"username\" style='margin-bottom: 10px; width: 95%;'><br>\n";
-    content += "Password: <input type=\"password\" name=\"password\" style='margin-bottom: 10px; width: 95%;'><br>\n";
-    content += "<input type=\"submit\" value=\"Submit\" style='width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>\n";
-    content += "</form>\n";
-    content += "</div>\n";
-    content += "<div id='changepass' style='display: none; background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>\n";
-    content += "<h2>Change Password</h2>\n";
-    content += "<form action=\"/newpass\" method=\"post\">\n";
-    content += "Username: <input type=\"text\" name=\"username\" style='margin-bottom: 10px; width: 95%;'><br>\n";
-    content += "Old Password: <input type=\"text\" name=\"oldpass\" style='margin-bottom: 10px; width: 95%;'><br>\n";
-    content += "New Password: <input type=\"text\" name=\"newpass\" style='margin-bottom: 10px; width: 95%;'><br>\n";
-    content += "<input type=\"submit\" value=\"Submit\" style='width: 100%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>\n";
-    content += "</form>\n";
-    content += "</div>\n";
-    content += "<script>\n";
-    content += "function toggleDisplay(showId, hideId) {\n";
-    content += "  var showElement = document.getElementById(showId);\n";
-    content += "  var hideElement = document.getElementById(hideId);\n";
-    content += "  if (showElement.style.display === 'none') {\n";
-    content += "    showElement.style.display = 'block';\n";
-    content += "    hideElement.style.display = 'none';\n";
-    content += "  } else {\n";
-    content += "    showElement.style.display = 'none';\n";
-    content += "  }\n";
-    content += "}\n";
-    content += "</script>\n";
-    content += "</body>\n";
-    content += "</html>\n";
-
-    string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\n" +
-                    "Set-Cookie: sid=" + sid +
-                    "\r\n\r\n";
-    string reply = header + content;
-
-    return reply;
-}
-
-// render menu page
-string renderMenuPage(string username)
-{
-    string content = "";
-    content += "<html>\n";
-    content += "<head><title>Menu</title></head>\n";
-    content += "<body style='font-family: Arial, sans-serif; background-color: #f0f0f0; text-align: center; padding-top: 50px;'>\n";
-    content += "<h1 style='color: #333;'>Welcome, " + username + "!</h1>\n";
-    content += "<div style='background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center;'>\n";
-    content += "<ul style='list-style: none; padding: 0;'>\n";
-    content += "<li style='margin: 10px 0;'><button onclick=\"window.location.href='/mailbox'\" style='width: 90%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>Mailbox</button></li>\n";
-    content += "<li style='margin: 10px 0;'><button onclick=\"window.location.href='/drive'\" style='width: 90%; padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer;'>Drive</button></li>\n";
-    content += "</ul>\n";
-    content += "</div>\n";
-    content += "<button onclick=\"window.location.href='/'\" style='margin-top: 20px; padding: 10px; width: 300px; background-color: #f44336; color: white; border: none; cursor: pointer;'>Sign Out</button>\n";
-    content += "</body>\n";
-    content += "</html>\n";
-
-    string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\n\r\n";
-    string reply = header + content;
-
-    return reply;
-}
 
 // render the drive webpage
 // TODO: render files retrieved from backend
-string renderDrivePage(string username, int currentClientNumber, string dir_path = "")
-{
 
-    vector<pair<string, int>> files = get_drive(username, currentClientNumber, dir_path);
-    printf("directory path is : %s\n", dir_path.c_str());
-    printf("username is : %s\n", username.c_str());
-
-    string content = "";
-    content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
-    content += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    content += "<title>PennCloud Drive</title>";
-    content += "<style>body { font-family: Arial, sans-serif; } ul { list-style-type: none; } li { margin-bottom: 10px; }</style></head><body>";
-    content += "<h1>PennCloud Drive</h1>";
-
-    content += "<h2>Create Folder</h2>";
-    content += "<button onclick=\"document.getElementById('create-form').style.display='block'\">Create Folder</button>";
-    content += "<div id='create-form' style='display:none;'>";
-    content += "<form action='/create-folder' method='post'>";
-    content += "<label for='folder-name'>Folder Name:</label>";
-    content += "<input type='text' id='folder-name' name='folderName' required>";
-    content += "<button type='submit'>Create</button>";
-    content += "</form></div>";
-
-    content += "<h2>Upload File</h2>";
-    content += "<form action='/upload-file' method='post' enctype='multipart/form-data'>";
-    content += "<input type='file' name='fileToUpload' required>";
-    content += "<button type='submit'>Upload File</button>";
-    content += "</form>";
-
-    content += "<h2>Content</h2>";
-    content += "<ul>";
-
-    for (const pair<string, int> p : files)
-    {
-        string name = p.first;
-        int isdir = p.second;
-        if (isdir)
-        {
-            if (dir_path == "")
-            {
-                content += "<li><a href='/drive/" + name + "'>" + name + "</a>";
-            }
-            else
-            {
-                content += "<li><a href='/drive/" + dir_path + "/" + name + "'>" + name + "</a>";
-            }
-            content += "<form action='/rename' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newName' placeholder='New name'>";
-            content += "<button type='submit'>Rename</button>";
-            content += "</form>";
-
-            content += "<form action='/move' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newPath' placeholder='New path'>";
-            content += "<button type='submit'>Move</button>";
-            content += "</form>";
-
-            content += "<form action='/delete' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Delete</button>";
-            content += "</form>";
-        }
-        else
-        {
-            content += "<li>" + name;
-            content += "<form action='/rename' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newName' placeholder='New name'>";
-            content += "<button type='submit'>Rename</button>";
-            content += "</form>";
-
-            content += "<form action='/move' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<input type='text' name='newPath' placeholder='New path'>";
-            content += "<button type='submit'>Move</button>";
-            content += "</form>";
-
-            content += "<form action='/delete' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Delete</button>";
-            content += "</form>";
-
-            content += "<form action='/download' method='post' style='display:inline;'>";
-            content += "<input type='hidden' name='fileName' value='" + name + "'>";
-            content += "<button type='submit'>Download</button>";
-            content += "</form>";
-        }
-    }
-    content += "</body></html>";
-
-    string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\n\r\n";
-    string reply = header + content;
-
-    return reply;
-}
 
 // render the mailbox webpage
 // TODO: render emails retrieved from the backend
@@ -1550,10 +1031,6 @@ string generateReply(int reply_code, string username = "", string item = "", str
     else if (reply_code == UPLOAD)
     {
         return renderDrivePage(username, currentClientNumber, item);
-    }
-    else if (reply_code == ADMIN)
-    {
-        return renderAdminPage();
     }
 
     string reply = renderErrorPage(reply_code);
@@ -2199,12 +1676,6 @@ void *thread_worker(void *fd)
                     {
                         reply_code = LOGIN;
                     }
-
-                    else if (strcmp(url + strlen(url) - strlen("/admin"), "/admin") == 0)
-                    {
-                        reply_code = ADMIN;
-                    }
-
                     // mailbox page
                     else if (strcmp(url, "/mailbox") == 0)
                     {
