@@ -22,33 +22,9 @@
 #include <openssl/evp.h>
 #include <iomanip>
 
+#include "frontendserver.h"
+
 using namespace std;
-
-struct Node
-{
-    int id;
-    string ip;
-    int tcp;
-    int udp;
-    int udp2;
-    string name;
-    bool isAlive;
-    int socket;
-    int port;
-
-    Node(){};
-    Node(int id, string ip, int tcp, int udp, int udp2, string name)
-        : id(id), ip(ip), tcp(tcp), udp(udp), udp2(udp2), name(name) {}
-};
-
-struct email
-{
-    string from;
-    string epochTime;
-    string content;
-    string id;
-    email(){};
-};
 
 int PORT = 10000;
 int DEBUG = 0;
@@ -313,20 +289,27 @@ pair<string, int> extractIPAndPort(const string &serverInfo)
     return result;
 }
 
-std::string urlEncode(const std::string &value) {
+std::string urlEncode(const std::string &value)
+{
     std::ostringstream encodedStream;
     encodedStream << std::hex << std::uppercase;
-    
-    for (char ch : value) {
-        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+
+    for (char ch : value)
+    {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~')
+        {
             encodedStream << ch;
-        } else {
+        }
+        else
+        {
             encodedStream << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(static_cast<unsigned char>(ch));
         }
     }
 
     return encodedStream.str();
 }
+
+
 /////////////////////////////////////
 //                                 //
 //           Utilities             //
@@ -938,6 +921,22 @@ void mailMessage(string username, string to, string subject, string message)
     //-----
 }
 
+void deleteEmail(string username, string item, int currentClientNumber)
+{
+    printf("in deleteEmail \n");
+    printf("item is %s \n", item.c_str());
+
+    // wow
+    //get everything post delete
+    string prefix = "delete/";
+    size_t pos = item.find(prefix);
+    string result = item.substr(pos + prefix.length());
+    string command = "DELETE " + result + "\r\n";
+    DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.c_str(), backend_socks[currentClientNumber].socket) : 0;
+    sendToBackendSocket(currentClientNumber, command, username);
+    string response = readFromBackendSocket(currentClientNumber, username);
+    DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+}
 int connectToMail()
 {
     int mail_sock_temp;
@@ -1124,9 +1123,8 @@ string renderAdminPage()
     return reply;
 }
 // render the login webpage
-string renderLoginPage(string sid)
+string renderLoginPage(string sid, string errorMessage = "")
 {
-
     string content = "";
     content += "<html>\n";
     content += "<head><title>Login Page</title></head>\n";
@@ -1134,6 +1132,10 @@ string renderLoginPage(string sid)
     content += "<h1 style='color: #333;'>PennCloud Login</h1>\n";
     content += "<div style='background-color: white; padding: 20px; margin: auto; width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>\n";
     content += "<h2>Log in</h2>\n";
+    if (!errorMessage.empty())
+    {
+        content += "<p style='color: red;'>" + errorMessage + "</p>\n";
+    }
     content += "<form action=\"/menu\" method=\"post\">\n";
     content += "Username: <input type=\"text\" name=\"username\" style='margin-bottom: 10px; width: 95%;'><br>\n";
     content += "Password: <input type=\"password\" name=\"password\" style='margin-bottom: 10px; width: 95%;'><br>\n";
@@ -1182,7 +1184,6 @@ string renderLoginPage(string sid)
 
     return reply;
 }
-
 
 // render menu page
 string renderMenuPage(string username)
@@ -1313,28 +1314,40 @@ string renderDrivePage(string username, int currentClientNumber, string dir_path
 // TODO: render emails retrieved from the backend
 string renderMailboxPage(string username, int currentClientNumber)
 {
-
     vector<email> emails = get_mailbox(username, currentClientNumber);
 
+    // Start building the page content
     string content = "";
-    content += "<html><head><title>File List</title></head><body>";
+    content += "<html><head><title>Mailbox</title></head><body>";
     content += "<h1>PennCloud Mailbox</h1>";
-    content += "<p>Click to view or send an email</p>";
+    content += "<p>Click to view or send an email.</p>";
     content += "<ul>";
-    content += "<li><a href='/mailbox/send'>send</a></li>";
+    content += "<li><a href='/mailbox/send'>Send an Email</a></li>";
+    content += "</ul>";
 
+    // Email list section
+    content += "<table border='1' style='width: 100%;'>";
+    content += "<tr><th>From</th><th>Time</th><th>Actions</th></tr>";
     for (email currEmail : emails)
     {
         string timeDecoded = base64DecodeString(currEmail.epochTime);
-        string toDisplayCurr = "from : " + currEmail.from + " time : " + timeDecoded + " id : " + currEmail.id;
-        content += "<li><a href='/mailbox/" + currEmail.id + "'>" + toDisplayCurr + "</a></li>";
-    }
+        string toDisplayCurr = currEmail.from + " (" + timeDecoded + ")";
+        string viewLink = "<a href='/mailbox/" + currEmail.id + "'>View</a>";
+        string deleteLink = "<a href='/mailbox/delete/" + currEmail.id + "'>Delete</a>";
 
-    content += "</ul>";
+        // Render each email in a table row with actions
+        content += "<tr>";
+        content += "<td>" + toDisplayCurr + "</td>";
+        content += "<td>" + timeDecoded + "</td>";
+        content += "<td>" + viewLink + " | " + deleteLink + "</td>";
+        content += "</tr>";
+    }
+    content += "</table>";
     content += "</body></html>";
 
+    // Construct the full HTTP response
     string header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: " +
-                    to_string(content.length()) + "\r\nConnection : keep-alive" + "\r\n\r\n";
+                    to_string(content.length()) + "\r\nConnection: keep-alive\r\n\r\n";
     string reply = header + content;
 
     return reply;
@@ -1344,6 +1357,7 @@ string renderMailboxPage(string username, int currentClientNumber)
 string renderEmailPage(string username, string item, int currentClientNumber)
 {
     string content;
+    printf("item is %s\n", item.c_str());
     if (item == "send")
     {
         content += "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>";
@@ -1497,6 +1511,12 @@ string generateReply(int reply_code, string username = "", string item = "", str
     }
     else if (reply_code == EMAIL)
     {
+        // if the reply_code starts with delete we actually render the mailbox Krimo
+        if (item.rfind("delete", 0) == 0)
+        {
+            deleteEmail(username, item, currentClientNumber);
+            return renderMailboxPage(username, currentClientNumber);
+        }
         return renderEmailPage(username, item, currentClientNumber);
     }
     else if (reply_code == SENDEMAIL)
@@ -1640,18 +1660,18 @@ void *thread_worker(void *fd)
                     memcpy(content, dataBuffer, contentlen);
                     content[contentlen] = '\0';
 
-                    //TODO uncomment if statement
-                    // process the message body
-                    // if (DEBUG)
-                    // {
-                    //     // fprintf(stderr, "[%d] C: %s\n", sock, content);
-                    //     // fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
-                    //     for (int c = 0; c < contentlen; c++)
-                    //     {
-                    //         char c_tmp[1];
-                    //         strncpy(c_tmp, content + c, 1);
-                    //         c_tmp[1] = '\0';
-                    //         fprintf(stderr, "%s", c_tmp);
+                    // TODO uncomment if statement
+                    //  process the message body
+                    //  if (DEBUG)
+                    //  {
+                    //      // fprintf(stderr, "[%d] C: %s\n", sock, content);
+                    //      // fprintf(stderr, "[%d] C: %ld\n", sock, dataBufferSize);
+                    //      for (int c = 0; c < contentlen; c++)
+                    //      {
+                    //          char c_tmp[1];
+                    //          strncpy(c_tmp, content + c, 1);
+                    //          c_tmp[1] = '\0';
+                    //          fprintf(stderr, "%s", c_tmp);
 
                     //         // break for message body that's too long
                     //         if (c >= 2048)
@@ -1732,7 +1752,6 @@ void *thread_worker(void *fd)
                         cout << oldpass << endl;
                         cout << newpass << endl;
                         cout << to_string(oldpass == newpass) << endl;
-                        
 
                         connectToBackend(username, currentClientNumber);
 
@@ -2063,7 +2082,7 @@ void *thread_worker(void *fd)
                         if (DEBUG)
                         {
                             // TODO Need to uncomment
-                            //fprintf(stderr, "[%d] S: %s\n", sock, reply);
+                            // fprintf(stderr, "[%d] S: %s\n", sock, reply);
                         }
                     }
 
@@ -2157,8 +2176,8 @@ void *thread_worker(void *fd)
                             send(sock, reply, strlen(reply), 0);
                             if (DEBUG)
                             {
-                                //TODO need to uncomment
-                                //fprintf(stderr, "[%d] S: %s\n", sock, reply);
+                                // TODO need to uncomment
+                                // fprintf(stderr, "[%d] S: %s\n", sock, reply);
                             }
                         }
                     }
@@ -2302,8 +2321,8 @@ void *thread_worker(void *fd)
                     send(sock, unkCmd, strlen(unkCmd), 0);
                     if (DEBUG)
                     {
-                        //TODO need to uncomment
-                       //fprintf(stderr, "[%d] S: %s", sock, unkCmd);
+                        // TODO need to uncomment
+                        // fprintf(stderr, "[%d] S: %s", sock, unkCmd);
                     }
                 }
 
@@ -2328,8 +2347,8 @@ void *thread_worker(void *fd)
             }
             if (DEBUG)
             {
-                //TODO need to uncomment
-                //fprintf(stderr, "[%d] Connection closed\n", sock);
+                // TODO need to uncomment
+                // fprintf(stderr, "[%d] Connection closed\n", sock);
             }
             num_client -= 1;
             pthread_exit(NULL);
@@ -2435,8 +2454,8 @@ int main(int argc, char *argv[])
 
         if (DEBUG)
         {
-            //TODO need to uncomment
-            //fprintf(stderr, "[%d] New Connection\n", *fd);
+            // TODO need to uncomment
+            // fprintf(stderr, "[%d] New Connection\n", *fd);
         }
 
         // record socket fd in the sockets array
