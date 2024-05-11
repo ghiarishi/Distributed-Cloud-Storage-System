@@ -1,4 +1,3 @@
-// frontendserver.cc
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,5 +39,9 @@ string renderLoginPage(string sid, string errorMessage = "");
 string renderMenuPage(string username);
 string renderDrivePage(string username, int currentClientNumber, string dir_path = "");
 string getFileName(const string &path);
+string renderMailboxPage(string username, int currentClientNumber);
+string renderEmailPage(string username, string item, int currentClientNumber);
+string renderErrorPage(int err_code);
+string generateReply(int reply_code, string username = "", string item = "", string sid = "", int currentClientNumber = 0);
 
 #endif // RENDER_H

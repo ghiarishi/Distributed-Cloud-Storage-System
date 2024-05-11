@@ -1,6 +1,7 @@
 #include "frontendserver.h"
 #include "render.h"
 #include "readingHelper.h"
+#include "loginHelper.h"
 
 using namespace std;
 
@@ -194,3 +195,117 @@ int connectToBackend(string username, int clientNum)
     backend_socks[clientNum].socket = backend_sock;
     return 0;
 }
+
+vector<char> base64Decode(const string &encoded_data)
+{
+    // Create a BIO chain for Base64 decoding
+    BIO *bio = BIO_new_mem_buf(encoded_data.data(), encoded_data.length());
+    BIO *base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Prepare to read the decoded data
+    vector<char> decoded_data(encoded_data.length()); // Allocate enough space
+    int decoded_length = BIO_read(bio, decoded_data.data(), decoded_data.size());
+
+    if (decoded_length < 0)
+    {
+        // Handle the case where decoding fails
+        cerr << "Error decoding Base64 string." << endl;
+        decoded_data.clear();
+    }
+    else
+    {
+        // Resize the vector to the actual decoded length
+        decoded_data.resize(decoded_length);
+    }
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return decoded_data;
+}
+
+string base64DecodeString(const string &encoded_data)
+{
+    // Create a BIO chain for Base64 decoding
+    BIO *bio = BIO_new_mem_buf(encoded_data.data(), encoded_data.length());
+    BIO *base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Prepare to read the decoded data
+    vector<char> decoded_data(encoded_data.length()); // Allocate enough space
+    int decoded_length = BIO_read(bio, decoded_data.data(), decoded_data.size());
+
+    if (decoded_length < 0)
+    {
+        // Handle the case where decoding fails
+        cerr << "Error decoding Base64 string." << endl;
+        decoded_data.clear();
+    }
+    else
+    {
+        // Resize the vector to the actual decoded length
+        decoded_data.resize(decoded_length);
+    }
+
+    // Clean up
+    BIO_free_all(bio);
+
+    string stringDecodedData(decoded_data.begin(), decoded_data.end());
+    return stringDecodedData;
+}
+
+string base64Encode(const vector<char> &data)
+{
+    // Create a BIO object for base64 encoding
+    BIO *bio = BIO_new(BIO_s_mem());
+    BIO *base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Write data to BIO
+    BIO_write(bio, data.data(), data.size());
+    BIO_flush(bio);
+
+    // Get the encoded data
+    BUF_MEM *bio_buf;
+    BIO_get_mem_ptr(bio, &bio_buf);
+
+    // Convert the encoded data to a std::string
+    std::string encoded_data(bio_buf->data, bio_buf->length);
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return encoded_data;
+}
+
+string base64Encode(const string &dataString)
+{
+    vector<char> data(dataString.begin(), dataString.end());
+    // Create a BIO object for base64 encoding
+    BIO *bio = BIO_new(BIO_s_mem());
+    BIO *base64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(base64, BIO_FLAGS_BASE64_NO_NL);
+    bio = BIO_push(base64, bio);
+
+    // Write data to BIO
+    BIO_write(bio, data.data(), data.size());
+    BIO_flush(bio);
+
+    // Get the encoded data
+    BUF_MEM *bio_buf;
+    BIO_get_mem_ptr(bio, &bio_buf);
+
+    // Convert the encoded data to a std::string
+    std::string encoded_data(bio_buf->data, bio_buf->length);
+
+    // Clean up
+    BIO_free_all(bio);
+
+    return encoded_data;
+}
+
+

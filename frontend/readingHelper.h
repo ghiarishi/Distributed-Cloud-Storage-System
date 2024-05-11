@@ -1,4 +1,3 @@
-// frontendserver.cc
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,5 +39,10 @@ string readFromBackendSocket(int clientNumber, string username);
 string readFromSocket(int backend_sock);
 int connectToBackend(string username, int clientNum);
 pair<string, int> extractIPAndPort(const string &serverInfo);
+vector<char> base64Decode(const string &encoded_data);
+string base64DecodeString(const string &encoded_data);
+string base64Encode(const vector<char> &data);
+string base64Encode(const string &dataString);
+
 
 #endif // RENDER_H
