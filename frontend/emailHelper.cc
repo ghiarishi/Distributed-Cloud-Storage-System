@@ -3,34 +3,44 @@ using namespace std;
 
 #include "emailHelper.h"
 
-std::tuple<std::string, std::string> extractSubjectAndMessage(const std::string &email)
-{
-    std::string subject, message;
+std::tuple<std::string, std::string> extractSubjectAndMessage(const std::string &email) {
 
-    // Find the position of "Subject: "
-    size_t subjectPos = email.find("Subject: ");
-    if (subjectPos != std::string::npos)
-    {
-        // Extract the subject starting from the position after "Subject: "
-        subject = email.substr(subjectPos + 9); // 9 is the length of "Subject: "
+    printf("The email is %s\n", email.c_str());
+    // Markers for headers
+    const std::string subjectMarker = "Subject:";
+    const std::string endOfHeaders = "\n"; // Assuming subject ends with a newline
 
-        // Find the position of the next occurrence of "\n" after the subject
-        size_t newlinePos = subject.find("\n");
-        if (newlinePos != std::string::npos)
-        {
-            // Extract the message starting from the position after the newline
-            message = subject.substr(newlinePos + 1);
-            // Remove the trailing newline if present
-            if (!message.empty() && message.back() == '\n')
-            {
-                message.pop_back();
-            }
-            // Trim any leading whitespace from the message
-            message.erase(0, message.find_first_not_of(" \t\n\r\f\v"));
-        }
+    // Find the position of "Subject:"
+    size_t startPos = email.find(subjectMarker);
+    if (startPos == std::string::npos) {
+        return {"", ""}; // Subject marker not found
+    }
+    startPos += subjectMarker.length(); // Move past "Subject:"
+
+    // Find the end of the subject line
+    size_t endPos = email.find("\n", startPos);
+    if (endPos == std::string::npos) {
+        return {"", ""}; // Newline after subject not found
     }
 
-    return std::make_tuple(subject, message);
+    // Extract the subject, trimming any leading and trailing whitespace
+    std::string subject = email.substr(startPos, endPos - startPos);
+    size_t subjectStart = subject.find_first_not_of(" ");
+    size_t subjectEnd = subject.find_last_not_of(" ");
+    subject = subject.substr(subjectStart, subjectEnd - subjectStart + 1);
+
+    printf("the subject is %s\n" , subject.c_str());
+    
+
+    // Message starts immediately after the newline character at the end of the subject
+    size_t messageStart = endPos + 1; // Move past the newline character
+
+    // Extract the message
+    std::string message = email.substr(messageStart);
+
+    printf("the message is %s\n" , message.c_str());
+
+    return {subject, message};
 }
 
 string extractPath(const string &path)

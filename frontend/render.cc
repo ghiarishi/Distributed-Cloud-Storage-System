@@ -3,7 +3,6 @@
 
 using namespace std;
 
-
 // Get filename from the path
 string getFileName(const string &path)
 {
@@ -179,7 +178,7 @@ string renderMenuPage(string username)
     return reply;
 }
 
-string renderDrivePage(string username, int currentClientNumber, string dir_path )
+string renderDrivePage(string username, int currentClientNumber, string dir_path)
 {
 
     vector<pair<string, int>> files = get_drive(username, currentClientNumber, dir_path);
@@ -283,7 +282,7 @@ void deleteEmail(string username, string item, int currentClientNumber)
     printf("item is %s \n", item.c_str());
 
     // wow
-    //get everything post delete
+    // get everything post delete
     string prefix = "delete/";
     size_t pos = item.find(prefix);
     string result = item.substr(pos + prefix.length());
@@ -436,11 +435,12 @@ string renderEmailPage(string username, string item, int currentClientNumber)
         // Extract sender, subject, and body from emailLines
         for (const string &emailLine : emailLines)
         {
+            printf("Email string is %s\n", emailLine.c_str());
             if (emailLine.find("From:") == 0)
             {
                 // Extract sender's name (part before '@' and after '<')
                 size_t start = emailLine.find("<");
-                size_t end = emailLine.find("@");
+                size_t end = emailLine.find(">");
                 if (start != string::npos && end != string::npos)
                 {
                     sender = emailLine.substr(start + 1, end - start - 1);
@@ -449,6 +449,10 @@ string renderEmailPage(string username, string item, int currentClientNumber)
             else if (emailLine.find("Subject:") == 0)
             {
                 subject = emailLine.substr(9); // Extract subject
+            }
+            else if (emailLine.find("To:") == 0)
+            {
+                body += "";
             }
             else
             {
@@ -524,7 +528,7 @@ string renderErrorPage(int err_code)
     return reply;
 }
 
-string generateReply(int reply_code, string username, string item , string sid , int currentClientNumber)
+string generateReply(int reply_code, string username, string item, string sid, int currentClientNumber)
 {
     if (reply_code == LOGIN)
     {

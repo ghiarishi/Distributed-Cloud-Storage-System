@@ -816,9 +816,6 @@ int main(int argc, char *argv[])
     case 'p':
       port = atoi(optarg);
       break;
-    case 'a':
-      cerr << "Pranshu Kumar (pranshuk)" << endl;
-      exit(0);
     case 'v':
       debugLog = true;
       break;
@@ -834,13 +831,13 @@ int main(int argc, char *argv[])
   // Check for the directory argument (after processing flags)
   if (optind >= argc)
   { // optind is the index of the next non-option argument
-    cerr << "Usage: " << argv[0] << " <directory> [-v] [-p port] [-a]" << endl;
+    cerr << "Usage: " << argv[0] << "[-v] [-p port]" << endl;
     exit(1);
   }
 
-  directory = argv[optind];
+  directory = "mailtest";
 
-  initMailboxMutexes(directory);
+  //initMailboxMutexes(directory);
 
   // Establishing Server Socket - TCP Port
   serverSocketFd = socket(AF_INET, SOCK_STREAM, 0);

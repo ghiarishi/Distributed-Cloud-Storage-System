@@ -26,13 +26,14 @@
 
 
 #include "frontendserver.h"
+
 #ifndef EMAILHELPER_H
 #define EMAILHELPER_H
 
 #include <string>
 #include <vector>
 
-std::tuple<std::string, std::string> extractSubjectAndMessage(const std::string &email);
+tuple<string, string> extractSubjectAndMessage(const string &email);
 string extractPath(const string &path);
 
 #endif // FRONTENDSERVER_H
