@@ -25,9 +25,6 @@
 #include <string> 
 
 
-#include "frontendserver.h"
-// render.h
-
 #ifndef READHELP_H
 #define READHELP_H
 
@@ -45,4 +42,4 @@ string base64Encode(const vector<char> &data);
 string base64Encode(const string &dataString);
 
 
-#endif // RENDER_H
+#endif 

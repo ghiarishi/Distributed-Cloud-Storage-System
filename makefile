@@ -2,7 +2,7 @@ TARGETS = frontendserver loadbalancer admin kvstore master smtpServer smtpec
 CXXFLAGS = -w -I/usr/include/openssl
 LDFLAGS = -pthread -lssl -lcrypto
 
-FRONTENDSERVER_SRCS = frontend/frontendserver.cc frontend/render.cc frontend/readingHelper.cc frontend/emailHelper.cc frontend/loginHelper.cc
+FRONTENDSERVER_SRCS = frontend/render.cc frontend/readingHelper.cc frontend/emailHelper.cc frontend/loginHelper.cc frontend/frontendserver.cc
 FRONTENDSERVER_OBJS = $(FRONTENDSERVER_SRCS:.cc=.o)
 
 all: $(TARGETS)

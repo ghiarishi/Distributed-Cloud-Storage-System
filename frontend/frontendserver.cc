@@ -24,10 +24,10 @@
 
 
 #include "frontendserver.h"
-#include "render.h"
 #include "readingHelper.h"
 #include "emailHelper.h"
 #include "loginHelper.h"
+#include "render.h"
 
 using namespace std;
 
@@ -443,11 +443,13 @@ void *thread_worker(void *fd)
 
                     else if (reply_code == MOVE)
                     {
+                        printf("in move file / folder\n");
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
                         string new_path = msg_map["newPath"];
                         string fpath = fname;
                         string new_fpath = new_path;
+                        printf("item is %s\n", item.c_str());
                         if (item.size() != 0)
                         {
                             fpath = item + "/" + fname;
@@ -479,17 +481,19 @@ void *thread_worker(void *fd)
                             // Process each line
                             for (const auto &line : lines)
                             {
-                                if (line != "\r\n")
+                                if (line != "\r\n" & line != "\n")
                                 {
                                     // For each LIST item ( for ex : /content/butterflyFour/filename.txt )
                                     // GET cally,/content/butterflyFour/filename.txt
                                     // PUT cally,/content/newpath,valuethatweGot
                                     // DELETE cally,/content/butterflyFour/filename.txt
-                                    string command = "GET " + username + ",/content/" + fpath + "\r\n";
+                                    DEBUG ? printf("Current item we're moving is : |%s| and line length is %d \n", line.c_str(), line.length()) : 0;
+
+                                    string command = "GET " + username + "," + line + "\r\n";
                                     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
                                     sendToBackendSocket(currentClientNumber, command, username);
                                     string response = readFromBackendSocket(currentClientNumber, username);
-                                    DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
+                                    DEBUG ? printf("Response came ( won't print ) \n") : 0;
 
                                     string prefix = "+OK ";
                                     response = response.substr(prefix.length());
@@ -499,7 +503,7 @@ void *thread_worker(void *fd)
                                     response = readFromBackendSocket(currentClientNumber, username);
                                     DEBUG ? printf("Response: %s \n", response.c_str()) : 0;
 
-                                    command = "DELETE " + username + ",/content/" + fpath + "\r\n";
+                                    command = "DELETE " + username + "," + line + "\r\n";
                                     DEBUG ? printf("Sending to backend: %s\nBackend sock: %d\n", command.substr(0, 200).c_str(), backend_socks[currentClientNumber].socket) : 0;
                                     sendToBackendSocket(currentClientNumber, command, username);
                                     response = readFromBackendSocket(currentClientNumber, username);
