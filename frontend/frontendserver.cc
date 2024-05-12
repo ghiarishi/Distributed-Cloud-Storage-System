@@ -365,7 +365,6 @@ void *thread_worker(void *fd)
 
                     else if (reply_code == DELETE)
                     {
-                        
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
                         string fpath = fname;

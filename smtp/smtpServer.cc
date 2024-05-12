@@ -599,22 +599,22 @@ void *handle_connection(void *arg)
           {
             string mailbox_file = directory + "/" + recipient_email.substr(0, recipient_email.find('@')) + ".mbox";
             // Opens the file in append mode
-            FILE *mbox_file = fopen(mailbox_file.c_str(), "a+");
+            //FILE *mbox_file = fopen(mailbox_file.c_str(), "a+");
             // If condition to check that file exists
-            if (mbox_file != NULL)
+            if (true)
             {
               // Acquire the file descriptor and then use to acquire lock
-              fd = fileno(mbox_file);
+              //fd = fileno(mbox_file);
 
               /*
               Blocking wait to acquire file lock - cannot be acquired if another process is using it,
               but can be acquired if another thread of same program is using the file
               */
-              if (flock(fd, LOCK_EX) < 0)
+              if (false)
               {
                 // Close the file and write out an error that file lock couldn't be obtained
-                cerr << "Failed to lock file " << endl;
-                fclose(mbox_file);
+                //cerr << "Failed to lock file " << endl;
+                //fclose(mbox_file);
               }
               else
               {
@@ -828,12 +828,12 @@ int main(int argc, char *argv[])
     }
   }
 
-  // Check for the directory argument (after processing flags)
-  if (optind >= argc)
-  { // optind is the index of the next non-option argument
-    cerr << "Usage: " << argv[0] << "[-v] [-p port]" << endl;
-    exit(1);
-  }
+  // // Check for the directory argument (after processing flags)
+  // if (optind >= argc)
+  // { // optind is the index of the next non-option argument
+  //   cerr << "Usage: " << argv[0] << "[-v] [-p port]" << endl;
+  //   exit(1);
+  // }
 
   directory = "mailtest";
 
