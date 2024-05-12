@@ -1,13 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <pthread.h>
+// Standard C headers
+#include <stdio.h>      // I/O operations
+#include <stdlib.h>     // Memory management, conversions
+#include <string.h>     // String manipulation functions
+#include <unistd.h>     // POSIX operating system API
+#include <pthread.h>    // POSIX threads
+
+// System headers for network programming
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <signal.h>
 #include <fcntl.h>
+
+// C++ standard library headers
 #include <iostream>
 #include <string>
 #include <map>
@@ -16,24 +21,41 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+
+// OpenSSL headers
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
 #include <openssl/evp.h>
+
+// Other standard library headers
 #include <iomanip>
-#include <string>
 #include <utility>
-#include <string> 
 
+#include "frontendserver.h" // Custom frontend server declarations
 
-#include "frontendserver.h"
-
+// Include guard to prevent multiple inclusions of this header file
 #ifndef EMAILHELPER_H
 #define EMAILHELPER_H
 
-#include <string>
-#include <vector>
+// Include necessary standard C++ headers for email processing functions
+#include <string>   // C++ string class
+#include <vector>   // C++ vector container
 
-tuple<string, string> extractSubjectAndMessage(const string &email);
-string extractPath(const string &path);
+/**
+ * @brief Extracts the subject and message from an email string.
+ * 
+ * @param email The raw email content as a string.
+ * @return A tuple containing the subject and message extracted from the email.
+ */
+std::tuple<std::string, std::string> extractSubjectAndMessage(const std::string &email);
 
-#endif // FRONTENDSERVER_H
+/**
+ * @brief Extracts a file path from a given string.
+ * 
+ * @param path The raw path string.
+ * @return The extracted path as a string.
+ */
+std::string extractPath(const std::string &path);
+
+// End of include guard
+#endif // EMAILHELPER_H
