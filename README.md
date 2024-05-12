@@ -8,7 +8,7 @@
 
 ## How to Run Our PennCloud
 
-**Note:** These setup instructions are specific to our demo. Detailed demo instructions can be found in `DEMO.md`.
+**Note:** These setup instructions are tailored for our demo. You can find comprehensive demo instructions in `DEMO.md`.
 
 ### Setup Steps
 1. **Navigate to Project Directory:**  
@@ -18,7 +18,7 @@
    Run `make`
 
 3. **Start the Key-Value Store Master:**  
-   Open a terminal and navigate to `sp24-cis5050-T18/backend/kvstore/`  
+   In a terminal, navigate to `sp24-cis5050-T18/backend/kvstore/`  
    Run `./master`
 
 4. **Initialize Key-Value Stores:**
@@ -51,15 +51,15 @@
      Run `./kvstore -i 3 -p 2009`
 
 5. **Start the SMTP Server:**  
-   Open a terminal and navigate to `sp24-cis5050-T18/smtp`  
+   In a terminal, navigate to `sp24-cis5050-T18/smtp`  
    Run `/smtpServer -p 2500`
 
 6. **Initialize the Frontend Services:**
    - **Load Balancer:**  
-     Open a terminal and navigate to `sp24-cis5050-T18/frontend`  
+     In a terminal, navigate to `sp24-cis5050-T18/frontend`  
      Run `./loadbalancer`
    - **Admin Interface:**  
-     Open a terminal and navigate to `sp24-cis5050-T18/frontend`  
+     In a terminal, navigate to `sp24-cis5050-T18/frontend`  
      Run `./admin`
 
 ### Final Steps
@@ -70,7 +70,25 @@
    Select "Enable" for at least one frontend server.
 
 3. **Access the Frontend:**  
-   Navigate to `http://localhost:7500` to be routed through the load balancer.
+   Navigate to `http://localhost:7500` to route through the load balancer.
 
 ### Further Instructions
-To redo the demo we ran with Dr.Phan you can find it in the file titled `DEMO.md`.
+To replicate the demo presented to Dr. Phan, see `DEMO.md`.
+
+### Image Descriptions
+All images are located in the `images` folder.
+
+1. **Admin Console:**  
+   The Admin Console allows administrators to enable/disable servers and view data stored in each backend node. See `Admin.png` and `AdminData.jpg`.
+
+2. **Login Page:**  
+   Two images illustrate the login pages, where users can log in or sign up if they don't have an account. See `loginPage.png` and `signupPage.png`.
+
+3. **Home Page:**  
+   `homePage.png` depicts the home page that users see after logging in.
+
+4. **Email Page:**  
+   `emailExample.png` shows the email composition page, and `inbox.png` shows the inbox view.
+
+5. **Drive Page:**  
+   `drivePage.png` shows the drive page after some files have been uploaded. Clicking folder links opens the folder view.
