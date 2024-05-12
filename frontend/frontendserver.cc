@@ -22,7 +22,6 @@
 #include <openssl/evp.h>
 #include <iomanip>
 
-
 #include "frontendserver.h"
 #include "readingHelper.h"
 #include "emailHelper.h"
@@ -357,7 +356,7 @@ void *thread_worker(void *fd)
                         string responseDecoded(responseVec.begin(), responseVec.end());
                         DEBUG ? printf("Response decoded : %s \n", responseDecoded.c_str()) : 0;
 
-                        //std::string subject, message;
+                        // std::string subject, message;
                         auto [subject, message] = extractSubjectAndMessage(responseDecoded);
                         message = "Fwd message \n" + message;
                         DEBUG ? printf("subject is : |%s| message is |%s|\n", subject.c_str(), message.c_str()) : 0;
@@ -366,6 +365,7 @@ void *thread_worker(void *fd)
 
                     else if (reply_code == DELETE)
                     {
+                        
                         map<string, string> msg_map = parseQuery(string(content));
                         string fname = msg_map["fileName"];
                         string fpath = fname;
