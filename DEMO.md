@@ -1,24 +1,74 @@
-# Instructions for Demo
+# Demo Instructions
 
 ## Setup Servers
- - Show Config.txt and explain the master nodes and the use of ports
- - Startup Master Node
- - Startup All Backend Servers (make use of -i and -p to start the backend servers)
- - Startup the front-end server and the load balancer
+1. **Configuration Overview:**  
+   - Review `Config.txt` and explain the master nodes and their port usage.
+
+2. **Start the Master Node:**  
+   - Initialize the master node.
+
+3. **Start All Backend Servers:**  
+   - Use the `-i` and `-p` flags to start the backend servers with their designated indices and ports.
+
+4. **Start the Frontend Server and Load Balancer:**  
+   - Initialize the frontend server and load balancer to distribute requests.
+
+## Feature Information
+1. **Emails:**
+   - **Within and Outside of PennCloud:** Sending emails to internal and external recipients.
+   - **Replying:** How to respond to emails.
+   - **Deleting:** Removing emails from the mailbox.
+
+2. **File Uploads:**
+   - **Max Upload Size:** The largest supported upload is 50 MB.
+   - **File Management:**  
+     - Uploading, downloading, and renaming files.
+     - Moving folders (including nested folders) between directories.
 
 ## Working Demo
- - Create a User (Create a user with username, such that hashes land in two different replica groups)
-   - _This shows the **PUT** command works_
- - Change the Password
-   - _This shows the **CPUT** command works_
- - Log in with the user (do this 3 times, in 3 different browsers - so that each of them connects to a different backend server)
-   - _This shows the **GET** command works_
-   - _This shows a **round-robin load balancing** on the backend works_
- - Upload a large file (10MB) - let's say A.pdf
- - Disable server (say server 2) in the replica group (say replica group 1). Upload another file B.jpg.
- - Disable all servers in replica group (same replica group 1).
- - Restart server 2 and login with another user such that request will be given to server 2 in replica group 1. Request for the file B.jpg.
-   - _This shows **replication** works_
-   - _This shows the system's **fault tolerance** works_
-   - _This shows system is consistent_
- - 
+1. **Create Users:**
+   - Demonstrate the **PUT** command by creating users whose hashes fall into different replica groups:  
+     - Anna: `qwerty!`  
+     - Laila: `asdfgh@`  
+     - Zihao: `zxcvbn#`
+
+2. **Change Password:**
+   - Demonstrate the **CPUT** command by changing Anna's password from `qwerty!` to `poiuyt$`.
+
+3. **Login Verification:**
+   - Verify the changed password and **CPUT** command functionality by attempting to log in Anna:  
+     - `qwerty!`: Should fail.  
+     - `poiuyt$`: Should succeed.  
+   - Demonstrate proper authentication with incorrect passwords.
+
+4. **Multiple Browser Logins:**
+   - Show **GET** command functionality and **round-robin load balancing** by logging in Anna on three different browsers to connect to different backend servers.
+
+5. **Large File Upload:**
+   - Upload a 10 MB file (`A.pdf`) to the nested path `/folderLevel0/folderLevel1/folderLevel2/a.pdf` to show folder creation.
+
+6. **Server Disabling and Upload:**
+   - Disable server 2 in replica group 1.
+   - Upload `B.jpg` to `/folderLevel0/folderLevel1/b.jpg` to validate continued functionality.
+
+7. **Server Recovery and Fault Tolerance:**
+   - Disable all servers in replica group 1, then restart server 2.
+   - Log in as another user to ensure that `B.jpg` is still accessible.  
+   - Demonstrates system **replication**, **fault tolerance**, and **consistency**.
+
+8. **Rename and Download Files:**
+   - Rename `b.jpg` to `/folderLevel0/folderLevel1/editedName.jpg`.  
+     - Shows **GET** command and **renaming** functionality.
+
+9. **Move Nested Folder:**
+   - Move `folderLevel1` from `/folderLevel0` to `/folderLevelNew`.  
+   - Demonstrates moving nested folders works.
+
+10. **External Email:**
+    - Send an email from `anna@seas.upenn.edu` to `ghiar@seas.upenn.edu`.  
+    - Shows emails can be sent **outside** of PennCloud.
+
+11. **Internal Email and Reply:**
+    - Send an email from Anna to Zihao and reply.  
+    - Demonstrates that internal emailing and **replying** work correctly.
+

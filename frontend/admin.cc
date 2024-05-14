@@ -38,6 +38,7 @@ struct FrontendServerInfo
 	string ip;
 	int tcpPort; // communication with client
 	int udpPort; // heartbeat/admin port
+	bool isDead = true;
 };
 
 typedef map<int, vector<BackendServerInfo>> BackendServerMap;
@@ -524,39 +525,56 @@ string renderErrorPage(int err_code)
 // render the admin webpage
 string renderAdminPage(string sid)
 {
-
 	string content = "";
 
 	// Start building the HTML content
 	content += "<!DOCTYPE html>\n";
 	content += "<html>\n";
 	content += "<head>\n";
-	content += "<title>Server List</title>\n";
+	content += "<title>Server Control Panel</title>\n";
+	content += "<style>\n";
+	content += "body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }\n";
+	content += ".header { padding: 20px; text-align: center; background-color: #007BFF; color: white; }\n";
+	content += ".header h1 { margin: 0; font-size: 2.5em; }\n";
+	content += ".container { padding: 20px; max-width: 900px; margin: auto; background-color: white; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }\n";
+	content += ".section-title { margin-top: 30px; font-size: 1.5em; border-bottom: 2px solid #007BFF; padding-bottom: 10px; }\n";
+	content += "ul { list-style: none; padding: 0; }\n";
+	content += "li { margin-bottom: 15px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9; }\n";
+	content += "form { display: inline-block; margin-right: 10px; }\n";
+	content += "input[type='submit'] { background-color: #007BFF; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }\n";
+	content += "input[type='submit']:hover { background-color: #0056b3; }\n";
+	content += "</style>\n";
 	content += "</head>\n";
 	content += "<body>\n";
+	content += "<div class='header'>\n";
 	content += "<h1>Server Control Panel</h1>\n";
+	content += "</div>\n";
+	content += "<div class='container'>\n";
+	content += "<div class='section-title'>Frontend</div>\n";
 	content += "<ul>\n";
 
-	content += "<h2>Frontend</h2>\n";
-	// Generate HTML list items with enable/disable forms for each server
+	// Generate HTML list items with enable/disable forms for each frontend server
 	for (const auto &server_info : frontend_servers)
 	{
 		string server = to_string(server_info.second.udpPort);
-		content += "<li>" + server + "\n";
-		// Enable button form
-		content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>";
-		content += "<input type='hidden' name='action' value='ENABLE'>";
-		content += "<input type='submit' value='Enable'>";
+		string status = server_info.second.isDead ? "Dead" : "Alive";
+		content += "<li>UDP Port: " + server + " (Status: " + status + ")\n";
+		content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>\n";
+		content += "<input type='hidden' name='action' value='ENABLE'>\n";
+		content += "<input type='submit' value='Enable'>\n";
 		content += "</form>\n";
-		// Disable button form
-		content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>";
-		content += "<input type='hidden' name='action' value='DISABLE'>";
-		content += "<input type='submit' value='Disable'>";
+		content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>\n";
+		content += "<input type='hidden' name='action' value='DISABLE'>\n";
+		content += "<input type='submit' value='Disable'>\n";
 		content += "</form>\n";
 		content += "</li>\n";
 	}
 
-	content += "<h2>Backend</h2>\n";
+	content += "</ul>\n";
+	content += "<div class='section-title'>Backend</div>\n";
+	content += "<ul>\n";
+
+	// Generate HTML list items with enable/disable forms for each backend server
 	for (const auto &server_info : backend_servers)
 	{
 		if (server_info.first == 0)
@@ -570,28 +588,26 @@ string renderAdminPage(string sid)
 		for (const auto &replica_info : server_info.second)
 		{
 			string server = to_string(replica_info.tcpPort2);
-			content += "<li>" + server + "\n";
-			// Enable button form
-			content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>";
-			content += "<input type='hidden' name='action' value='ENABLE'>";
-			content += "<input type='submit' value='Enable'>";
+			string status = replica_info.isDead ? "Dead" : "Alive";
+			content += "<li>TCP Port2: " + server + " (Status: " + status + ")\n";
+			content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>\n";
+			content += "<input type='hidden' name='action' value='ENABLE'>\n";
+			content += "<input type='submit' value='Enable'>\n";
 			content += "</form>\n";
-			// Disable button form
-			content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>";
-			content += "<input type='hidden' name='action' value='DISABLE'>";
-			content += "<input type='submit' value='Disable'>";
+			content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>\n";
+			content += "<input type='hidden' name='action' value='DISABLE'>\n";
+			content += "<input type='submit' value='Disable'>\n";
 			content += "</form>\n";
-			content += "</li>\n";
-			// View button form
-			content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>";
-			content += "<input type='hidden' name='action' value='VIEW'>";
-			content += "<input type='submit' value='View'>";
+			content += "<form action='http://localhost:" + to_string(PORT) + "/" + server + "' method='post'>\n";
+			content += "<input type='hidden' name='action' value='VIEW'>\n";
+			content += "<input type='submit' value='View'>\n";
 			content += "</form>\n";
 			content += "</li>\n";
 		}
 	}
 
 	content += "</ul>\n";
+	content += "</div>\n";
 	content += "</body>\n";
 	content += "</html>\n";
 
@@ -603,6 +619,7 @@ string renderAdminPage(string sid)
 
 	return reply;
 }
+
 
 string renderStoragePage(string sid, int backend_port)
 {
@@ -858,10 +875,31 @@ void *thread_worker(void *fd)
 						{
 							string cmd = "./frontendserver -v -p " + to_string(server_port - 10000) + " &";
 							int cmd_status = system(cmd.c_str());
+							for (auto it = frontend_servers.begin(); it != frontend_servers.end(); ++it)
+							{
+								printf("port is %d and updPort is %d\n", server_port, it->second.udpPort);
+								if (to_string(server_port) == to_string(it->second.udpPort))
+								{
+									it->second.isDead = false;
+									break;
+								}
+							}
 							if (DEBUG)
 							{
 								fprintf(stderr, "[%d] S: starting server on port %d\n", sock, server_port);
 								fprintf(stderr, "[%d] S: command status code %d\n", sock, cmd_status);
+							}
+						}
+						else
+						{
+							for (auto it = frontend_servers.begin(); it != frontend_servers.end(); ++it)
+							{
+								printf("port is %d and updPort is %d\n", server_port, it->second.udpPort);
+								if (to_string(server_port) == to_string(it->second.udpPort))
+								{
+									it->second.isDead = true;
+									break;
+								}
 							}
 						}
 					}
