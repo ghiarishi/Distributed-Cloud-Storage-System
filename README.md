@@ -1,6 +1,6 @@
 # Distributed Cloud Storage System
 
-## Team Members
+## Contributors
 - Rishi Ghia
 - Pranshu Kumar
 - Zihao Deng
